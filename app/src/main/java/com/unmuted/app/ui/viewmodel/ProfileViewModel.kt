@@ -2,6 +2,7 @@ package com.unmuted.app.ui.viewmodel
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -9,8 +10,10 @@ import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
 import com.unmuted.app.core.ImageCompressor
 import com.unmuted.app.core.TranscriptionService
+import com.unmuted.app.core.bakeVoiceDisguise
 import com.unmuted.app.data.UserProfile
 import com.unmuted.app.data.VoiceComment
+import com.unmuted.app.data.VoiceDisguise
 import com.unmuted.app.data.VoicePost
 import com.unmuted.app.data.repository.AudioStorageRepository
 import com.unmuted.app.data.repository.FeedRepository
@@ -125,13 +128,36 @@ class ProfileViewModel(
             var voiceBioPks: List<Double>? = null
 
             if (newVoiceBioFile != null && newVoiceBioFile.exists()) {
-                val tr = transcriptionService.transcribeAudioFile(newVoiceBioFile, newVoiceBioDurationMs).getOrNull()
-                val upload = audioStorageRepository.uploadBioAudio(currentUid, newVoiceBioFile)
-                upload.onSuccess { url ->
-                    voiceBioUrl = url
-                    voiceBioTranscript = tr?.transcript ?: "Pinned Voice Bio"
-                    voiceBioDur = newVoiceBioDurationMs
-                    voiceBioPks = newVoiceBioPeaks.map { it.toDouble() }
+                var bakedBioFile: File? = null
+                var uploadBioFile = newVoiceBioFile
+                try {
+                    try {
+                        uploadBioFile = bakeVoiceDisguise(appContext, newVoiceBioFile, VoiceDisguise.NONE)
+                        bakedBioFile = uploadBioFile
+                    } catch (e: Exception) {
+                        Log.e("ProfileViewModel", "Voice bio studio polish failed", e)
+                    }
+                    val trRes = transcriptionService.transcribeAudioFile(uploadBioFile, newVoiceBioDurationMs)
+                    trRes.onFailure { err ->
+                        Log.e("TranscriptionService", "Voice Bio transcription failed", err)
+                        messageBus.emit("Could not generate captions for voice bio. Saving audio.")
+                    }
+                    val tr = trRes.getOrNull()
+                    val upload = audioStorageRepository.uploadBioAudio(currentUid, uploadBioFile)
+                    upload.onSuccess { url ->
+                        voiceBioUrl = url
+                        voiceBioTranscript = tr?.transcript ?: "Pinned Voice Bio"
+                        voiceBioDur = newVoiceBioDurationMs
+                        voiceBioPks = newVoiceBioPeaks.map { it.toDouble() }
+                    }.onFailure { err ->
+                        Log.e("ProfileViewModel", "Voice bio upload failed", err)
+                        messageBus.emit("Could not upload voice bio.")
+                    }
+                } finally {
+                    runCatching { newVoiceBioFile.delete() }
+                    if (bakedBioFile != null && bakedBioFile != newVoiceBioFile) {
+                        runCatching { bakedBioFile.delete() }
+                    }
                 }
             }
 

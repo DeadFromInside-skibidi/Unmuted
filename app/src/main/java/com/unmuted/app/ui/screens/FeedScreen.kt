@@ -1,5 +1,6 @@
 package com.unmuted.app.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,6 +56,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -81,6 +84,7 @@ import com.unmuted.app.ui.components.VoicePostCard
 import com.unmuted.app.ui.components.rememberStudioHaptics
 import com.unmuted.app.ui.theme.ElectricCoral
 import com.unmuted.app.ui.theme.ObsidianBackground
+import com.unmuted.app.ui.theme.ObsidianHairline
 import com.unmuted.app.ui.theme.ObsidianSurface
 import com.unmuted.app.ui.theme.ObsidianSurfaceElevated
 import com.unmuted.app.ui.theme.SignalMint
@@ -108,6 +112,8 @@ fun FeedScreen(
     safetySettings: SafetySettings,
     playback: PlaybackState,
     currentUid: String,
+    radioModeEnabled: Boolean = playback.radioModeEnabled,
+    onToggleRadioMode: () -> Unit = {},
     onPlayPost: (VoicePost) -> Unit,
     onSeekToMs: (Long) -> Unit,
     onCycleSpeed: () -> Unit,
@@ -229,6 +235,38 @@ fun FeedScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (radioModeEnabled) ElectricCoral.copy(alpha = 0.22f) else ObsidianSurface,
+                    border = BorderStroke(1.dp, if (radioModeEnabled) ElectricCoral.copy(alpha = 0.70f) else ObsidianHairline),
+                    modifier = Modifier
+                        .height(40.dp)
+                        .clickable {
+                            haptics(HapticCue.CAPTION_TOGGLE)
+                            onToggleRadioMode()
+                        }
+                        .testTag("feed_radio_mode_btn")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Radio,
+                            contentDescription = if (radioModeEnabled) "Radio Mode Active" else "Radio Mode Inactive",
+                            tint = if (radioModeEnabled) ElectricCoral else TitaniumMuted,
+                            modifier = Modifier.size(17.dp)
+                        )
+                        Text(
+                            text = "Radio",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (radioModeEnabled) FontWeight.Bold else FontWeight.Normal,
+                            color = if (radioModeEnabled) StudioWhite else TitaniumMuted
+                        )
+                    }
+                }
+
                 Surface(
                     shape = CircleShape,
                     color = ObsidianSurface,

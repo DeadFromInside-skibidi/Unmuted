@@ -25,7 +25,7 @@ service firebase.storage {
     }
 
     // Pinned Voice Bios
-    match /audio/bios/{uid} {
+    match /audio/bios/{uid}/{fileName} {
       allow read: if isSignedIn();
       allow write: if isSignedIn() && request.auth.uid == uid && isValidAudioUpload();
     }

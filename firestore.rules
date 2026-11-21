@@ -239,6 +239,12 @@ service cloud.firestore {
              (!('urgentLegalReview' in data) || data.urgentLegalReview is bool);
     }
 
+    function isValidAnonymousOwnership(data) {
+      return data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+             data.targetCollection in ['posts', 'comments'] &&
+             isValidTimestamp(data.createdAt);
+    }
+
     // --- COLLECTION RULES ---
 
     match /users/{userId} {
@@ -262,6 +268,20 @@ service cloud.firestore {
                        incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'handle', 'bio', 'accentKey', 'bannerKey', 'waveformStyle', 'avatarBase64', 'voiceBioAudioUrl', 'voiceBioMediaId', 'voiceBioTranscript', 'voiceBioDurationMs', 'voiceBioPeaks', 'interests', 'followerCount', 'followingCount', 'updatedAt']);
 
       allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+      match /private/{docId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(docId) && request.auth.uid == userId;
+        allow list: if false;
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(docId) &&
+                         request.auth.uid == userId &&
+                         incoming().salt is string && incoming().salt.size() == 64 &&
+                         isValidTimestamp(incoming().createdAt) &&
+                         incoming().keys().hasAll(['salt', 'createdAt']) &&
+                         incoming().keys().hasOnly(['salt', 'createdAt']);
+        allow update, delete: if false;
+      }
 
       match /reactions/{postId} {
         allow get: if isSignedIn() && isValidId(userId) && isValidId(postId) && request.auth.uid == userId;
@@ -401,13 +421,32 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isValidId(roomId) && existing().creatorUid == request.auth.uid;
     }
 
+    match /anonymous_ownership/{docId} {
+      allow get: if isSignedIn() && isValidId(docId) && existing().ownerUid == request.auth.uid;
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidId(docId) &&
+                       incoming().ownerUid == request.auth.uid &&
+                       !exists(/databases/$(database)/documents/anonymous_ownership/$(docId)) &&
+                       incoming().keys().hasAll(['ownerUid', 'targetCollection', 'createdAt']) &&
+                       incoming().keys().hasOnly(['ownerUid', 'targetCollection', 'createdAt']) &&
+                       isValidAnonymousOwnership(incoming());
+
+      allow delete: if isSignedIn() && isValidId(docId) && existing().ownerUid == request.auth.uid;
+    }
+
     match /posts/{postId} {
       allow get: if isSignedIn() && isValidId(postId);
       allow list: if isSignedIn() && (resource.data.visibility == 'PUBLIC' || resource.data.authorUid == request.auth.uid);
 
       allow create: if isSignedIn() &&
                        isValidId(postId) &&
-                       incoming().authorUid == request.auth.uid &&
+                       (
+                         (!incoming().anonymousMode && incoming().authorUid == request.auth.uid) ||
+                         (incoming().anonymousMode && incoming().authorUid != request.auth.uid &&
+                          getAfter(/databases/$(database)/documents/anonymous_ownership/$(postId)).data.ownerUid == request.auth.uid)
+                       ) &&
                        incoming().keys().hasAll(['authorUid', 'authorName', 'authorHandle', 'postKind', 'anonymousMode', 'voiceDisguise', 'durationMs', 'waveformPeaks', 'transcript', 'captionSegments', 'likeCount', 'dislikeCount', 'commentCount', 'echoCount', 'visibility', 'createdAt', 'updatedAt']) &&
                        incoming().keys().hasOnly(['authorUid', 'authorName', 'authorHandle', 'authorAccentKey', 'authorAvatarBase64', 'postKind', 'roomId', 'roomSlug', 'anonymousMode', 'anonymousAlias', 'voiceDisguise', 'audioUrl', 'audioMediaId', 'durationMs', 'waveformPeaks', 'transcript', 'captionSegments', 'headlineText', 'attachmentImageBase64', 'hashtags', 'likeCount', 'dislikeCount', 'commentCount', 'echoCount', 'engagementScore', 'controversyScore', 'searchTokens', 'isShortPulse', 'isAnonymous', 'hotTakeMode', 'agreeCount', 'disagreeCount', 'quotedPostId', 'quotedAuthorName', 'quotedAudioUrl', 'quotedAudioMediaId', 'quotedStartMs', 'quotedEndMs', 'quotedDisguise', 'quotedTranscript', 'quotedWaveformPeaks', 'expiresAtMs', 'visibility', 'createdAt', 'updatedAt']) &&
                        isValidPost(incoming());
@@ -420,13 +459,20 @@ service cloud.firestore {
                        incoming().postKind == existing().postKind &&
                        (
                          // Action 1: Author edits text/transcript
-                         (existing().authorUid == request.auth.uid &&
+                         ((existing().authorUid == request.auth.uid ||
+                           (exists(/databases/$(database)/documents/anonymous_ownership/$(postId)) &&
+                            get(/databases/$(database)/documents/anonymous_ownership/$(postId)).data.ownerUid == request.auth.uid)) &&
                           incoming().diff(existing()).affectedKeys().hasOnly(['headlineText', 'transcript', 'captionSegments', 'updatedAt'])) ||
                          // Action 2: Engagement & Hot Take debate counter updates
                          (incoming().diff(existing()).affectedKeys().hasOnly(['likeCount', 'dislikeCount', 'commentCount', 'echoCount', 'agreeCount', 'disagreeCount', 'engagementScore', 'controversyScore', 'updatedAt']))
                        );
 
-      allow delete: if isSignedIn() && isValidId(postId) && existing().authorUid == request.auth.uid;
+      allow delete: if isSignedIn() && isValidId(postId) &&
+                       (
+                         existing().authorUid == request.auth.uid ||
+                         (exists(/databases/$(database)/documents/anonymous_ownership/$(postId)) &&
+                          get(/databases/$(database)/documents/anonymous_ownership/$(postId)).data.ownerUid == request.auth.uid)
+                       );
 
       match /comments/{commentId} {
         allow get: if isSignedIn() && isValidId(postId) && isValidId(commentId);
@@ -435,7 +481,11 @@ service cloud.firestore {
         allow create: if isSignedIn() &&
                          isValidId(postId) &&
                          isValidId(commentId) &&
-                         incoming().authorUid == request.auth.uid &&
+                         (
+                           (!incoming().anonymousMode && incoming().authorUid == request.auth.uid) ||
+                           (incoming().anonymousMode && incoming().authorUid != request.auth.uid &&
+                            getAfter(/databases/$(database)/documents/anonymous_ownership/$(commentId)).data.ownerUid == request.auth.uid)
+                         ) &&
                          incoming().postId == postId &&
                          incoming().keys().hasAll(['postId', 'authorUid', 'authorName', 'authorHandle', 'anonymousMode', 'voiceDisguise', 'durationMs', 'waveformPeaks', 'likeCount', 'dislikeCount', 'visibility', 'createdAt', 'updatedAt']) &&
                          incoming().keys().hasOnly(['postId', 'authorUid', 'authorName', 'authorHandle', 'anonymousMode', 'anonymousAlias', 'voiceDisguise', 'stance', 'textBody', 'audioUrl', 'audioMediaId', 'durationMs', 'waveformPeaks', 'transcript', 'captionSegments', 'likeCount', 'dislikeCount', 'visibility', 'createdAt', 'updatedAt']) &&
@@ -450,12 +500,19 @@ service cloud.firestore {
                          incoming().postId == existing().postId &&
                          incoming().createdAt == existing().createdAt &&
                          (
-                           (existing().authorUid == request.auth.uid &&
+                           ((existing().authorUid == request.auth.uid ||
+                             (exists(/databases/$(database)/documents/anonymous_ownership/$(commentId)) &&
+                              get(/databases/$(database)/documents/anonymous_ownership/$(commentId)).data.ownerUid == request.auth.uid)) &&
                             incoming().diff(existing()).affectedKeys().hasOnly(['textBody', 'transcript', 'updatedAt'])) ||
                            (incoming().diff(existing()).affectedKeys().hasOnly(['likeCount', 'dislikeCount', 'updatedAt']))
                          );
 
-        allow delete: if isSignedIn() && isValidId(postId) && isValidId(commentId) && existing().authorUid == request.auth.uid;
+        allow delete: if isSignedIn() && isValidId(postId) && isValidId(commentId) &&
+                         (
+                           existing().authorUid == request.auth.uid ||
+                           (exists(/databases/$(database)/documents/anonymous_ownership/$(commentId)) &&
+                            get(/databases/$(database)/documents/anonymous_ownership/$(commentId)).data.ownerUid == request.auth.uid)
+                         );
       }
     }
 

@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Tag
@@ -126,6 +127,8 @@ fun DiscoverScreen(
     playback: PlaybackState,
     currentUid: String,
     subTab: DiscoverSubTab,
+    radioModeEnabled: Boolean = playback.radioModeEnabled,
+    onToggleRadioMode: () -> Unit = {},
     trendingTopics: List<TrendingAudioTopic> = emptyList(),
     onSearchQueryChange: (String) -> Unit,
     onSelectFilter: (DiscoverFilter) -> Unit,
@@ -269,36 +272,73 @@ fun DiscoverScreen(
                 }
             }
 
-            // Secondary Toggle: Explore | Pulses
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = ObsidianSurface,
-                border = BorderStroke(1.dp, ObsidianHairline)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Row(modifier = Modifier.padding(3.dp)) {
-                    DiscoverSubTab.entries.forEach { tab ->
-                        val selected = tab == subTab
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(11.dp))
-                                .background(
-                                    if (selected) Brush.linearGradient(listOf(ElectricCoral, StudioViolet))
-                                    else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (radioModeEnabled) ElectricCoral.copy(alpha = 0.22f) else ObsidianSurface,
+                    border = BorderStroke(1.dp, if (radioModeEnabled) ElectricCoral.copy(alpha = 0.70f) else ObsidianHairline),
+                    modifier = Modifier
+                        .height(36.dp)
+                        .clickable {
+                            haptics(HapticCue.CAPTION_TOGGLE)
+                            onToggleRadioMode()
+                        }
+                        .testTag("discover_radio_mode_btn")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.padding(horizontal = 9.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Radio,
+                            contentDescription = if (radioModeEnabled) "Radio Mode Active" else "Radio Mode Inactive",
+                            tint = if (radioModeEnabled) ElectricCoral else TitaniumMuted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "Radio",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (radioModeEnabled) FontWeight.Bold else FontWeight.Normal,
+                            color = if (radioModeEnabled) StudioWhite else TitaniumMuted
+                        )
+                    }
+                }
+
+                // Secondary Toggle: Explore | Pulses
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = ObsidianSurface,
+                    border = BorderStroke(1.dp, ObsidianHairline)
+                ) {
+                    Row(modifier = Modifier.padding(3.dp)) {
+                        DiscoverSubTab.entries.forEach { tab ->
+                            val selected = tab == subTab
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .background(
+                                        if (selected) Brush.linearGradient(listOf(ElectricCoral, StudioViolet))
+                                        else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                                    )
+                                    .clickable {
+                                        haptics(HapticCue.CAPTION_TOGGLE)
+                                        onSubTabChanged(tab)
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                                    .testTag("discover_subtab_${tab.name.lowercase()}"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = tab.label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (selected) StudioWhite else TitaniumMuted
                                 )
-                                .clickable {
-                                    haptics(HapticCue.CAPTION_TOGGLE)
-                                    onSubTabChanged(tab)
-                                }
-                                .padding(horizontal = 12.dp, vertical = 7.dp)
-                                .testTag("discover_subtab_${tab.name.lowercase()}"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = tab.label,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selected) StudioWhite else TitaniumMuted
-                            )
+                            }
                         }
                     }
                 }

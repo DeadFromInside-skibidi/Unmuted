@@ -132,25 +132,19 @@ test("VoicePost & Comments create, engagement counters, and anonymous mode parit
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
   const ts = pastDate(10000);
 
-  await assertSucceeds(
-    aliceDb.collection("posts").doc("post_1").set({
+  // Real UID leak attempt: anonymousMode with real authorUid fails
+  await assertFails(
+    aliceDb.collection("posts").doc("post_leak").set({
       authorUid: ALICE_UID,
       authorName: "Alice Studio",
       authorHandle: "alice_voice",
-      authorAccentKey: "CORAL",
       postKind: "FEED_VOICE",
-      roomId: "room_anon_1",
-      roomSlug: "unpopular",
       anonymousMode: true,
-      anonymousAlias: "Phantom_482",
       voiceDisguise: "DEEP",
-      audioMediaId: "blob_1",
       durationMs: 12000,
-      waveformPeaks: [0.2, 0.7, 0.9, 0.4],
-      transcript: "Honestly remote work changed everything.",
-      captionSegments: [{ startMs: 0, endMs: 4000, text: "Honestly remote work changed everything." }],
-      headlineText: "Hot take on office culture",
-      hashtags: ["work", "unmuted"],
+      waveformPeaks: [0.2, 0.7],
+      transcript: "Leak test",
+      captionSegments: [],
       likeCount: 0,
       dislikeCount: 0,
       commentCount: 0,
@@ -160,6 +154,69 @@ test("VoicePost & Comments create, engagement counters, and anonymous mode parit
       updatedAt: ts,
     })
   );
+
+  // Anonymous post without anonymous_ownership record fails
+  await assertFails(
+    aliceDb.collection("posts").doc("post_no_owner").set({
+      authorUid: "anon_alice_orphan",
+      authorName: "Phantom_482",
+      authorHandle: "@anonymous",
+      postKind: "FEED_VOICE",
+      anonymousMode: true,
+      voiceDisguise: "DEEP",
+      durationMs: 12000,
+      waveformPeaks: [0.2, 0.7],
+      transcript: "Orphan test",
+      captionSegments: [],
+      likeCount: 0,
+      dislikeCount: 0,
+      commentCount: 0,
+      echoCount: 0,
+      visibility: "PUBLIC",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // Alice creates anonymous post with masked authorUid and anonymous_ownership in batch
+  const anonPostBatch = aliceDb.batch();
+  anonPostBatch.set(aliceDb.collection("posts").doc("post_1"), {
+    authorUid: "anon_alice_12345",
+    authorName: "Phantom_482",
+    authorHandle: "@anonymous",
+    authorAccentKey: "CORAL",
+    postKind: "FEED_VOICE",
+    roomId: "room_anon_1",
+    roomSlug: "unpopular",
+    anonymousMode: true,
+    anonymousAlias: "Phantom_482",
+    voiceDisguise: "DEEP",
+    audioMediaId: "blob_1",
+    durationMs: 12000,
+    waveformPeaks: [0.2, 0.7, 0.9, 0.4],
+    transcript: "Honestly remote work changed everything.",
+    captionSegments: [{ startMs: 0, endMs: 4000, text: "Honestly remote work changed everything." }],
+    headlineText: "Hot take on office culture",
+    hashtags: ["work", "unmuted"],
+    likeCount: 0,
+    dislikeCount: 0,
+    commentCount: 0,
+    echoCount: 0,
+    visibility: "PUBLIC",
+    createdAt: ts,
+    updatedAt: ts,
+  });
+  anonPostBatch.set(aliceDb.collection("anonymous_ownership").doc("post_1"), {
+    ownerUid: ALICE_UID,
+    targetCollection: "posts",
+    createdAt: ts,
+  });
+  await assertSucceeds(anonPostBatch.commit());
+
+  // Bob cannot read Alice's anonymous ownership record
+  await assertFails(bobDb.collection("anonymous_ownership").doc("post_1").get());
+  // Alice can read her own anonymous ownership record
+  await assertSucceeds(aliceDb.collection("anonymous_ownership").doc("post_1").get());
 
   // Reject future timestamp
   await assertFails(
@@ -198,32 +255,41 @@ test("VoicePost & Comments create, engagement counters, and anonymous mode parit
     })
   );
 
-  // Bob adds voice comment on existing post
-  await assertSucceeds(
-    bobDb.collection("posts").doc("post_1").collection("comments").doc("c_1").set({
-      postId: "post_1",
-      authorUid: BOB_UID,
-      authorName: "Bob",
-      authorHandle: "bob_v",
-      anonymousMode: true,
-      anonymousAlias: "CipherOwl_74",
-      voiceDisguise: "MASKED",
-      textBody: "Totally agree with this take.",
-      durationMs: 0,
-      waveformPeaks: [],
-      likeCount: 0,
-      dislikeCount: 0,
-      visibility: "PUBLIC",
-      createdAt: pastDate(2000),
-      updatedAt: pastDate(2000),
-    })
-  );
+  // Bob adds voice comment on existing post (with anonymous ownership)
+  const bobCommentBatch = bobDb.batch();
+  bobCommentBatch.set(bobDb.collection("posts").doc("post_1").collection("comments").doc("c_1"), {
+    postId: "post_1",
+    authorUid: "anon_bob_678901",
+    authorName: "CipherOwl_74",
+    authorHandle: "@anonymous",
+    anonymousMode: true,
+    anonymousAlias: "CipherOwl_74",
+    voiceDisguise: "MASKED",
+    textBody: "Totally agree with this take.",
+    durationMs: 0,
+    waveformPeaks: [],
+    likeCount: 0,
+    dislikeCount: 0,
+    visibility: "PUBLIC",
+    createdAt: pastDate(2000),
+    updatedAt: pastDate(2000),
+  });
+  bobCommentBatch.set(bobDb.collection("anonymous_ownership").doc("c_1"), {
+    ownerUid: BOB_UID,
+    targetCollection: "comments",
+    createdAt: pastDate(2000),
+  });
+  await assertSucceeds(bobCommentBatch.commit());
 
   // Filtered queries succeed
   await assertSucceeds(bobDb.collection("posts").where("visibility", "==", "PUBLIC").get());
   await assertSucceeds(
     bobDb.collection("posts").doc("post_1").collection("comments").where("visibility", "==", "PUBLIC").get()
   );
+
+  // Anonymous post deletion: Bob cannot delete Alice's anonymous post, Alice can delete it
+  await assertFails(bobDb.collection("posts").doc("post_1").delete());
+  await assertSucceeds(aliceDb.collection("posts").doc("post_1").delete());
 });
 
 test("User reactions & joined_rooms subcollections enforce strict owner isolation", async () => {
@@ -242,6 +308,32 @@ test("User reactions & joined_rooms subcollections enforce strict owner isolatio
   await assertSucceeds(aliceDb.collection("users").doc(ALICE_UID).collection("reactions").get());
   await assertFails(bobDb.collection("users").doc(ALICE_UID).collection("reactions").get());
   await assertFails(bobDb.collection("users").doc(ALICE_UID).collection("reactions").doc("post_1").get());
+
+  // Alice saves per-user private anon salt
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("private").doc("anon_salt").set({
+      salt: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      createdAt: pastDate(1000),
+    })
+  );
+  // Alice can read her own salt
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("private").doc("anon_salt").get()
+  );
+  // Bob cannot read Alice's salt
+  await assertFails(
+    bobDb.collection("users").doc(ALICE_UID).collection("private").doc("anon_salt").get()
+  );
+  // No one can list private subcollection
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).collection("private").get()
+  );
+  // Salt is write-once (update/overwrite fails)
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).collection("private").doc("anon_salt").update({
+      salt: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+    })
+  );
 });
 
 test("Rooms create, list, and counter updates work securely", async () => {
@@ -351,46 +443,51 @@ test("Voice Masking presets, Voice Clapback quotes, and Dual-Side Hot Take Debat
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
   const ts = pastDate(8000);
 
-  // Create Hot Take Debate + Clapback post with STUDIO_RADIO & GLITCH voice masking
-  await assertSucceeds(
-    aliceDb.collection("posts").doc("clap_hottake_1").set({
-      authorUid: ALICE_UID,
-      authorName: "Alice Studio",
-      authorHandle: "alice_voice",
-      authorAccentKey: "VIOLET",
-      postKind: "FEED_VOICE",
-      roomId: "room_anon_1",
-      roomSlug: "unpopular",
-      anonymousMode: true,
-      anonymousAlias: "PrismFox_412",
-      voiceDisguise: "STUDIO_RADIO",
-      audioMediaId: "blob_reply_1",
-      durationMs: 14000,
-      waveformPeaks: [0.3, 0.8, 0.6, 0.9],
-      transcript: "Actually I completely disagree with that quote.",
-      captionSegments: [{ startMs: 0, endMs: 5000, text: "Actually I completely disagree with that quote." }],
-      headlineText: "AI music will never replace live concerts",
-      hashtags: ["music", "debate"],
-      likeCount: 0,
-      dislikeCount: 0,
-      commentCount: 0,
-      echoCount: 0,
-      hotTakeMode: true,
-      agreeCount: 0,
-      disagreeCount: 0,
-      quotedPostId: "post_orig_1",
-      quotedAuthorName: "CipherOwl_74",
-      quotedAudioMediaId: "blob_orig_1",
-      quotedStartMs: 2000,
-      quotedEndMs: 11000,
-      quotedDisguise: "GLITCH",
-      quotedTranscript: "Live shows are overrated.",
-      quotedWaveformPeaks: [0.4, 0.7, 0.5],
-      visibility: "PUBLIC",
-      createdAt: ts,
-      updatedAt: ts,
-    })
-  );
+  // Create Hot Take Debate + Clapback post with STUDIO_RADIO & GLITCH voice masking (batch with anonymous_ownership)
+  const clapBatch = aliceDb.batch();
+  clapBatch.set(aliceDb.collection("posts").doc("clap_hottake_1"), {
+    authorUid: "anon_alice_clap1",
+    authorName: "PrismFox_412",
+    authorHandle: "@anonymous",
+    authorAccentKey: "VIOLET",
+    postKind: "FEED_VOICE",
+    roomId: "room_anon_1",
+    roomSlug: "unpopular",
+    anonymousMode: true,
+    anonymousAlias: "PrismFox_412",
+    voiceDisguise: "STUDIO_RADIO",
+    audioMediaId: "blob_reply_1",
+    durationMs: 14000,
+    waveformPeaks: [0.3, 0.8, 0.6, 0.9],
+    transcript: "Actually I completely disagree with that quote.",
+    captionSegments: [{ startMs: 0, endMs: 5000, text: "Actually I completely disagree with that quote." }],
+    headlineText: "AI music will never replace live concerts",
+    hashtags: ["music", "debate"],
+    likeCount: 0,
+    dislikeCount: 0,
+    commentCount: 0,
+    echoCount: 0,
+    hotTakeMode: true,
+    agreeCount: 0,
+    disagreeCount: 0,
+    quotedPostId: "post_orig_1",
+    quotedAuthorName: "CipherOwl_74",
+    quotedAudioMediaId: "blob_orig_1",
+    quotedStartMs: 2000,
+    quotedEndMs: 11000,
+    quotedDisguise: "GLITCH",
+    quotedTranscript: "Live shows are overrated.",
+    quotedWaveformPeaks: [0.4, 0.7, 0.5],
+    visibility: "PUBLIC",
+    createdAt: ts,
+    updatedAt: ts,
+  });
+  clapBatch.set(aliceDb.collection("anonymous_ownership").doc("clap_hottake_1"), {
+    ownerUid: ALICE_UID,
+    targetCollection: "posts",
+    createdAt: ts,
+  });
+  await assertSucceeds(clapBatch.commit());
 
   // Reject invalid voiceDisguise preset
   await assertFails(
@@ -416,28 +513,33 @@ test("Voice Masking presets, Voice Clapback quotes, and Dual-Side Hot Take Debat
   );
 
   // Bob posts a DISAGREE audio reply using NEUTRAL_SHIFT mask and increments disagreeCount
-  await assertSucceeds(
-    bobDb.collection("posts").doc("clap_hottake_1").collection("comments").doc("debate_c1").set({
-      postId: "clap_hottake_1",
-      authorUid: BOB_UID,
-      authorName: "Bob",
-      authorHandle: "bob_v",
-      anonymousMode: true,
-      anonymousAlias: "EchoWarden_92",
-      voiceDisguise: "NEUTRAL_SHIFT",
-      stance: "DISAGREE",
-      audioMediaId: "blob_c1",
-      durationMs: 7000,
-      waveformPeaks: [0.2, 0.8],
-      transcript: "Concerts are way too expensive now.",
-      captionSegments: [{ startMs: 0, endMs: 7000, text: "Concerts are way too expensive now." }],
-      likeCount: 0,
-      dislikeCount: 0,
-      visibility: "PUBLIC",
-      createdAt: pastDate(2000),
-      updatedAt: pastDate(2000),
-    })
-  );
+  const debateBatch = bobDb.batch();
+  debateBatch.set(bobDb.collection("posts").doc("clap_hottake_1").collection("comments").doc("debate_c1"), {
+    postId: "clap_hottake_1",
+    authorUid: "anon_bob_debate1",
+    authorName: "EchoWarden_92",
+    authorHandle: "@anonymous",
+    anonymousMode: true,
+    anonymousAlias: "EchoWarden_92",
+    voiceDisguise: "NEUTRAL_SHIFT",
+    stance: "DISAGREE",
+    audioMediaId: "blob_c1",
+    durationMs: 7000,
+    waveformPeaks: [0.2, 0.8],
+    transcript: "Concerts are way too expensive now.",
+    captionSegments: [{ startMs: 0, endMs: 7000, text: "Concerts are way too expensive now." }],
+    likeCount: 0,
+    dislikeCount: 0,
+    visibility: "PUBLIC",
+    createdAt: pastDate(2000),
+    updatedAt: pastDate(2000),
+  });
+  debateBatch.set(bobDb.collection("anonymous_ownership").doc("debate_c1"), {
+    ownerUid: BOB_UID,
+    targetCollection: "comments",
+    createdAt: pastDate(2000),
+  });
+  await assertSucceeds(debateBatch.commit());
 
   await assertSucceeds(
     bobDb.collection("posts").doc("clap_hottake_1").update({

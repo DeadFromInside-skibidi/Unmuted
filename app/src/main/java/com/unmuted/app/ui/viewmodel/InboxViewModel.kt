@@ -2,6 +2,7 @@ package com.unmuted.app.ui.viewmodel
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -107,26 +108,41 @@ class InboxViewModel(
         onSent: () -> Unit
     ) {
         viewModelScope.launch {
-            val readyFile = if (disguise != VoiceDisguise.NONE) {
-                try {
-                    bakeVoiceDisguise(appContext, audioFile, disguise)
-                } catch (_: Exception) {
-                    audioFile
+            var bakedFile: File? = null
+            var readyFile = audioFile
+            try {
+                if (disguise != VoiceDisguise.NONE) {
+                    try {
+                        readyFile = bakeVoiceDisguise(appContext, audioFile, disguise)
+                        bakedFile = readyFile
+                    } catch (e: Exception) {
+                        Log.e("InboxViewModel", "Voice DM disguise baking failed", e)
+                        messageBus.emit("Voice masking failed. Recording was not uploaded to protect your identity.")
+                        return@launch
+                    }
                 }
-            } else {
-                audioFile
+                val transcriptRes = transcriptionService.transcribeAudioFile(readyFile, durationMs)
+                transcriptRes.onFailure { err ->
+                    Log.e("TranscriptionService", "Voice DM transcription failed", err)
+                    messageBus.emit("Could not transcribe voice note. Sending audio.")
+                }
+                val tr = transcriptRes.getOrNull()
+                inboxRepository.sendMessage(
+                    conversation = conversation,
+                    sender = sender,
+                    kind = MessageKind.VOICE,
+                    audioFile = readyFile,
+                    durationMs = durationMs,
+                    waveformPeaks = peaks,
+                    transcript = tr?.transcript ?: "Voice note",
+                    captionSegments = tr?.segments ?: emptyList()
+                ).onSuccess { onSent() }.onFailure { messageBus.emit("Failed to send voice note.") }
+            } finally {
+                runCatching { audioFile.delete() }
+                if (bakedFile != null && bakedFile != audioFile) {
+                    runCatching { bakedFile.delete() }
+                }
             }
-            val tr = transcriptionService.transcribeAudioFile(readyFile, durationMs).getOrNull()
-            inboxRepository.sendMessage(
-                conversation = conversation,
-                sender = sender,
-                kind = MessageKind.VOICE,
-                audioFile = readyFile,
-                durationMs = durationMs,
-                waveformPeaks = peaks,
-                transcript = tr?.transcript ?: "Voice note",
-                captionSegments = tr?.segments ?: emptyList()
-            ).onSuccess { onSent() }.onFailure { messageBus.emit("Failed to send voice note.") }
         }
     }
 

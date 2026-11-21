@@ -1,5 +1,6 @@
 package com.unmuted.app.ui.components
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -38,10 +39,12 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.ThumbDown
 import androidx.compose.material.icons.filled.ThumbUp
@@ -51,18 +54,22 @@ import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.ClosedCaptionOff
 import androidx.compose.material.icons.outlined.ThumbDown
 import androidx.compose.material.icons.outlined.ThumbUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,6 +79,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,6 +87,12 @@ import androidx.compose.ui.unit.dp
 import com.unmuted.app.core.ImageCompressor
 import com.unmuted.app.core.PlaybackPhase
 import com.unmuted.app.core.PlaybackState
+import com.unmuted.app.core.exportAudiogram
+import com.unmuted.app.core.shareAudiogramVideo
+import com.unmuted.app.core.sharePostText
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import com.unmuted.app.data.DebateStance
 import com.unmuted.app.data.SafetySettings
 import com.unmuted.app.data.UserPostReaction
@@ -147,7 +161,10 @@ fun VoicePostCard(
 
     val isClapback = post.hasQuoteClip()
     val expectedPlaybackId = if (isClapback) "clap_${post.id}" else post.audioMediaId
-    val isThisActive = !expectedPlaybackId.isNullOrBlank() && playback.activeMediaId == expectedPlaybackId
+    val isThisActive = playback.activeMediaId == post.id ||
+        playback.nowPlaying?.sourcePostId == post.id ||
+        (!expectedPlaybackId.isNullOrBlank() && playback.activeMediaId == expectedPlaybackId) ||
+        (!post.audioUrl.isNullOrBlank() && playback.activeMediaId == post.audioUrl)
     val isPlaying = isThisActive && playback.playing
     val isBuffering = isThisActive && playback.buffering
     val isQuotedPhase = isClapback && isThisActive && playback.activePhase == PlaybackPhase.QUOTED_CLIP
@@ -188,6 +205,12 @@ fun VoicePostCard(
     var captionsOpen by rememberSaveable(post.id) { mutableStateOf(false) }
     var mediaExpanded by rememberSaveable(post.id) { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
+    var showShareMenu by rememberSaveable(post.id) { mutableStateOf(false) }
+    var isExporting by remember { mutableStateOf(false) }
+    var exportProgress by remember { mutableStateOf(0f) }
+    var exportJob by remember { mutableStateOf<Job?>(null) }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val haptics = rememberStudioHaptics()
 
     val speedLabel = when (playback.speed) {
@@ -349,6 +372,14 @@ fun VoicePostCard(
                         expanded = menuExpanded,
                         onDismissRequest = { menuExpanded = false }
                     ) {
+                        DropdownMenuItem(
+                            text = { Text("Share Take (9:16 Video / Text)") },
+                            leadingIcon = { Icon(Icons.Filled.Share, null, tint = primaryAccent) },
+                            onClick = {
+                                menuExpanded = false
+                                showShareMenu = true
+                            }
+                        )
                         if (onQuoteClapback != null && !post.audioMediaId.isNullOrBlank()) {
                             DropdownMenuItem(
                                 text = { Text("Voice Clapback") },
@@ -904,8 +935,228 @@ fun VoicePostCard(
                         modifier = Modifier.size(19.dp)
                     )
                 }
+                IconButton(
+                    onClick = {
+                        haptics(HapticCue.REACTION)
+                        showShareMenu = true
+                    },
+                    modifier = Modifier.size(40.dp).testTag("share_btn_${post.id}")
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Share,
+                        contentDescription = "Share voice take",
+                        tint = TitaniumMuted,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
             }
         }
+    }
+
+    if (showShareMenu) {
+        AlertDialog(
+            onDismissRequest = { showShareMenu = false },
+            title = {
+                Text(
+                    text = "Share Voice Take",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = StudioWhite
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Export as vertical 9:16 video or share quote link:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TitaniumMuted
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = ObsidianSurfaceElevated,
+                        border = BorderStroke(1.dp, primaryAccent.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showShareMenu = false
+                                isExporting = true
+                                exportProgress = 0f
+                                exportJob = coroutineScope.launch {
+                                    try {
+                                        val file = exportAudiogram(context, post) { prog ->
+                                            exportProgress = prog
+                                        }
+                                        isExporting = false
+                                        shareAudiogramVideo(context, file, post)
+                                    } catch (e: CancellationException) {
+                                        isExporting = false
+                                    } catch (e: Exception) {
+                                        isExporting = false
+                                        Toast.makeText(
+                                            context,
+                                            "Export failed: ${e.localizedMessage ?: "Unknown error"}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(primaryAccent.copy(alpha = 0.22f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Movie,
+                                    contentDescription = null,
+                                    tint = primaryAccent,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text(
+                                    text = "Share Video (9:16 Audiogram)",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = StudioWhite
+                                )
+                                Text(
+                                    text = "Stories, WhatsApp, Shorts & Reels",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TitaniumMuted
+                                )
+                            }
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = ObsidianSurfaceElevated,
+                        border = BorderStroke(1.dp, ObsidianHairline),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showShareMenu = false
+                                sharePostText(context, post)
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(SignalMint.copy(alpha = 0.22f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Share,
+                                    contentDescription = null,
+                                    tint = SignalMint,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text(
+                                    text = "Share Text & Quote",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = StudioWhite
+                                )
+                                Text(
+                                    text = "Copy quote and post link",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TitaniumMuted
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showShareMenu = false }) {
+                    Text("Close", color = TitaniumMuted)
+                }
+            },
+            containerColor = ObsidianSurface,
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
+
+    if (isExporting) {
+        AlertDialog(
+            onDismissRequest = {
+                exportJob?.cancel()
+                isExporting = false
+            },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.Movie,
+                        contentDescription = null,
+                        tint = primaryAccent,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = "Rendering 9:16 Audiogram",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = StudioWhite
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Rendering synced lyrics and live waveform...",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TitaniumMuted
+                    )
+                    Spacer(Modifier.height(18.dp))
+                    LinearProgressIndicator(
+                        progress = { exportProgress },
+                        modifier = Modifier.fillMaxWidth().height(8.dp).clip(CircleShape),
+                        color = primaryAccent,
+                        trackColor = ObsidianSurfaceElevated
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        text = "${(exportProgress * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = primaryAccent
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        exportJob?.cancel()
+                        isExporting = false
+                    }
+                ) {
+                    Text("Cancel", color = AcousticError)
+                }
+            },
+            containerColor = ObsidianSurface,
+            shape = RoundedCornerShape(20.dp)
+        )
     }
 }
 

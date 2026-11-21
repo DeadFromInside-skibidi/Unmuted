@@ -54,5 +54,5 @@ class AudioStorageRepository(private val storage: FirebaseStorage = Firebase.sto
         uploadFile("audio/dms/$convId/$msgId.m4a", audioFile)
 
     suspend fun uploadBioAudio(uid: String, audioFile: File): Result<String> =
-        uploadFile("audio/bios/$uid.m4a", audioFile)
+        uploadFile("audio/bios/$uid/bio.m4a", audioFile)
 }

@@ -347,7 +347,12 @@ fun UnmutedAppShell(
                             safetySettings = safetySettings,
                             playback = playback,
                             currentUid = currentUid,
-                            onPlayPost = { post -> audioPlaybackViewModel.togglePlayPost(post, autoPlay = false) },
+                            radioModeEnabled = playback.radioModeEnabled,
+                            onToggleRadioMode = { audioPlaybackViewModel.toggleRadioMode() },
+                            onPlayPost = { post ->
+                                val feedList = pagedPosts.itemSnapshotList.items.ifEmpty { recentPosts }
+                                audioPlaybackViewModel.togglePlayPost(post, autoPlay = false, queuePosts = feedList)
+                            },
                             onSeekToMs = { ms -> audioPlaybackViewModel.seekTo(ms) },
                             onCycleSpeed = { audioPlaybackViewModel.cycleSpeed() },
                             onVote = { post, vote -> feedViewModel.votePost(post, vote) },
@@ -403,13 +408,21 @@ fun UnmutedAppShell(
                             playback = playback,
                             currentUid = currentUid,
                             subTab = discoverSubTab,
+                            radioModeEnabled = playback.radioModeEnabled,
+                            onToggleRadioMode = { audioPlaybackViewModel.toggleRadioMode() },
                             trendingTopics = discoverTrendingTopics,
                             onSearchQueryChange = { discoverViewModel.updateSearchQuery(it) },
                             onSelectFilter = { discoverViewModel.selectFilter(it) },
                             onSubTabChanged = { discoverSubTab = it },
                             onEnableUnfiltered = enableUnfilteredAction,
-                            onAutoPlayPost = { post -> audioPlaybackViewModel.togglePlayPost(post, autoPlay = true) },
-                            onPlayPost = { post -> audioPlaybackViewModel.togglePlayPost(post, autoPlay = false) },
+                            onAutoPlayPost = { post ->
+                                val discoverList = pagedDiscoverPosts.itemSnapshotList.items.ifEmpty { (recentPostsState as? DataUiState.Success)?.data.orEmpty() }
+                                audioPlaybackViewModel.togglePlayPost(post, autoPlay = true, queuePosts = discoverList)
+                            },
+                            onPlayPost = { post ->
+                                val discoverList = pagedDiscoverPosts.itemSnapshotList.items.ifEmpty { (recentPostsState as? DataUiState.Success)?.data.orEmpty() }
+                                audioPlaybackViewModel.togglePlayPost(post, autoPlay = false, queuePosts = discoverList)
+                            },
                             onSeekToMs = { ms -> audioPlaybackViewModel.seekTo(ms) },
                             onCycleSpeed = { audioPlaybackViewModel.cycleSpeed() },
                             onVote = { post, vote -> feedViewModel.votePost(post, vote) },
@@ -669,9 +682,11 @@ fun UnmutedAppShell(
                             SnackbarHost(hostState = snackbarHostState)
                             FloatingMiniPlayerBar(
                                 playback = playback,
+                                radioModeEnabled = playback.radioModeEnabled,
                                 allowVisible = showMiniPlayer,
                                 onTogglePlayPause = { audioPlaybackViewModel.togglePlayPauseActive() },
                                 onCycleSpeed = { audioPlaybackViewModel.cycleSpeed() },
+                                onToggleRadioMode = { audioPlaybackViewModel.toggleRadioMode() },
                                 onDismiss = { audioPlaybackViewModel.stopPlayback() },
                                 onOpenNowPlaying = {
                                     playback.nowPlaying?.sourcePostId?.let { id ->
@@ -693,9 +708,11 @@ fun UnmutedAppShell(
                         Column(modifier = Modifier.fillMaxWidth()) {
                             FloatingMiniPlayerBar(
                                 playback = playback,
+                                radioModeEnabled = playback.radioModeEnabled,
                                 allowVisible = showMiniPlayer,
                                 onTogglePlayPause = { audioPlaybackViewModel.togglePlayPauseActive() },
                                 onCycleSpeed = { audioPlaybackViewModel.cycleSpeed() },
+                                onToggleRadioMode = { audioPlaybackViewModel.toggleRadioMode() },
                                 onDismiss = { audioPlaybackViewModel.stopPlayback() },
                                 onOpenNowPlaying = {
                                     playback.nowPlaying?.sourcePostId?.let { id ->

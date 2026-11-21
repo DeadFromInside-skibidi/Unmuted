@@ -33,10 +33,60 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 
+private fun sha256(input: String): String {
+    val md = MessageDigest.getInstance("SHA-256")
+    val digest = md.digest(input.toByteArray(Charsets.UTF_8))
+    return digest.fold("") { str, it -> str + "%02x".format(it) }
+}
+
 class FeedRepository(private val db: FirebaseFirestore) {
+
+    @Volatile
+    private var cachedUserSalt: Pair<String, String>? = null
+
+    suspend fun getOrCreateAnonSalt(uid: String): String {
+        cachedUserSalt?.let { (cachedUid, salt) ->
+            if (cachedUid == uid && salt.isNotBlank()) return salt
+        }
+        val saltDocRef = db.collection("users").document(uid).collection("private").document("anon_salt")
+        val snap = try {
+            saltDocRef.get().await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        val existingSalt = snap?.getString("salt")
+        if (!existingSalt.isNullOrBlank()) {
+            cachedUserSalt = uid to existingSalt
+            return existingSalt
+        }
+        val randomBytes = ByteArray(32)
+        java.security.SecureRandom().nextBytes(randomBytes)
+        val newSalt = randomBytes.fold("") { str, it -> str + "%02x".format(it) }
+        val payload = mapOf(
+            "salt" to newSalt,
+            "createdAt" to FieldValue.serverTimestamp()
+        )
+        try {
+            saltDocRef.set(payload).await()
+            cachedUserSalt = uid to newSalt
+            return newSalt
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val refetch = saltDocRef.get().await().getString("salt")
+            if (!refetch.isNullOrBlank()) {
+                cachedUserSalt = uid to refetch
+                return refetch
+            }
+            throw e
+        }
+    }
 
     private val activePagingSources = CopyOnWriteArrayList<VoicePostPagingSource>()
 
@@ -145,11 +195,28 @@ class FeedRepository(private val db: FirebaseFirestore) {
             val initialEngagement = calculateEngagementScore(0L, 0L, 0L)
             val initialControversy = calculateControversyScore(0L, 0L, 0L)
 
+            val finalAuthorUid = if (effectiveAnonymous) {
+                val userSalt = getOrCreateAnonSalt(uid)
+                "anon_" + sha256(userSalt + ":" + (room?.id ?: "global")).take(16)
+            } else {
+                uid
+            }
+            val finalAuthorName = if (effectiveAnonymous) {
+                (alias ?: "Anonymous").take(60)
+            } else {
+                author.displayName.ifBlank { "Unmuted Speaker" }.take(60)
+            }
+            val finalAuthorHandle = if (effectiveAnonymous) {
+                "@anonymous"
+            } else {
+                author.handle.ifBlank { "speaker" }.take(40)
+            }
+
             val rawMap = mutableMapOf<String, Any?>(
-                "authorUid" to uid,
-                "authorName" to author.displayName.ifBlank { "Unmuted Speaker" }.take(60),
-                "authorHandle" to author.handle.ifBlank { "speaker" }.take(40),
-                "authorAccentKey" to author.accentKey.take(30),
+                "authorUid" to finalAuthorUid,
+                "authorName" to finalAuthorName,
+                "authorHandle" to finalAuthorHandle,
+                "authorAccentKey" to if (effectiveAnonymous) "OBSIDIAN" else author.accentKey.take(30),
                 "authorAvatarBase64" to if (effectiveAnonymous) null else author.avatarBase64?.take(215000),
                 "postKind" to postKind.name,
                 "roomId" to room?.id,
@@ -194,18 +261,33 @@ class FeedRepository(private val db: FirebaseFirestore) {
             )
             @Suppress("UNCHECKED_CAST")
             val cleanPayload = rawMap.filterValues { it != null } as Map<String, Any>
-            db.collection("posts").document(postId).set(cleanPayload).await()
+
+            val batch = db.batch()
+            batch.set(db.collection("posts").document(postId), cleanPayload)
+
+            if (effectiveAnonymous) {
+                val ownershipRef = db.collection("anonymous_ownership").document(postId)
+                batch.set(
+                    ownershipRef,
+                    mapOf(
+                        "ownerUid" to uid,
+                        "targetCollection" to "posts",
+                        "createdAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
 
             if (room != null) {
-                runCatching {
-                    db.collection("rooms").document(room.id).update(
-                        mapOf(
-                            "postCount" to FieldValue.increment(1L),
-                            "updatedAt" to FieldValue.serverTimestamp()
-                        )
-                    ).await()
-                }
+                val roomRef = db.collection("rooms").document(room.id)
+                batch.update(
+                    roomRef,
+                    mapOf(
+                        "postCount" to FieldValue.increment(1L),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                )
             }
+            batch.commit().await()
             invalidatePostsPaging()
             Result.success(postId)
         } catch (e: CancellationException) {
@@ -221,6 +303,9 @@ class FeedRepository(private val db: FirebaseFirestore) {
         return try {
             requireSignedInUid()
             db.collection("posts").document(postId).delete().await()
+            runCatching {
+                db.collection("anonymous_ownership").document(postId).delete().await()
+            }
             invalidatePostsPaging()
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -381,11 +466,29 @@ class FeedRepository(private val db: FirebaseFirestore) {
             val anon = post.anonymousMode
             val alias = if (anon) AliasGenerator.generateForRoom(uid, post.roomId ?: post.id) else null
             val effectiveStance = if (post.hotTakeMode) stance else DebateStance.NONE
+
+            val finalAuthorUid = if (anon) {
+                val userSalt = getOrCreateAnonSalt(uid)
+                "anon_" + sha256(userSalt + ":" + (post.roomId ?: "global")).take(16)
+            } else {
+                uid
+            }
+            val finalAuthorName = if (anon) {
+                (alias ?: "Anonymous").take(60)
+            } else {
+                author.displayName.ifBlank { "Unmuted Speaker" }.take(60)
+            }
+            val finalAuthorHandle = if (anon) {
+                "@anonymous"
+            } else {
+                author.handle.ifBlank { "speaker" }.take(40)
+            }
+
             val rawMap = mutableMapOf<String, Any?>(
                 "postId" to post.id,
-                "authorUid" to uid,
-                "authorName" to author.displayName.ifBlank { "Unmuted Speaker" }.take(60),
-                "authorHandle" to author.handle.ifBlank { "speaker" }.take(40),
+                "authorUid" to finalAuthorUid,
+                "authorName" to finalAuthorName,
+                "authorHandle" to finalAuthorHandle,
                 "anonymousMode" to anon,
                 "anonymousAlias" to alias,
                 "voiceDisguise" to voiceDisguise.name,
@@ -405,10 +508,23 @@ class FeedRepository(private val db: FirebaseFirestore) {
             )
             @Suppress("UNCHECKED_CAST")
             val payload = rawMap.filterValues { it != null } as Map<String, Any>
-            db.collection("posts").document(post.id)
+
+            val batch = db.batch()
+            val commentRef = db.collection("posts").document(post.id)
                 .collection("comments").document(commentId)
-                .set(payload)
-                .await()
+            batch.set(commentRef, payload)
+
+            if (anon) {
+                val ownershipRef = db.collection("anonymous_ownership").document(commentId)
+                batch.set(
+                    ownershipRef,
+                    mapOf(
+                        "ownerUid" to uid,
+                        "targetCollection" to "comments",
+                        "createdAt" to FieldValue.serverTimestamp()
+                    )
+                )
+            }
 
             val newComments = post.commentCount + 1L
             val newEngagement = calculateEngagementScore(post.likeCount, newComments, post.echoCount)
@@ -424,7 +540,9 @@ class FeedRepository(private val db: FirebaseFirestore) {
             } else if (effectiveStance == DebateStance.DISAGREE) {
                 postUpdates["disagreeCount"] = FieldValue.increment(1L)
             }
-            db.collection("posts").document(post.id).update(postUpdates).await()
+            val postRef = db.collection("posts").document(post.id)
+            batch.update(postRef, postUpdates)
+            batch.commit().await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e

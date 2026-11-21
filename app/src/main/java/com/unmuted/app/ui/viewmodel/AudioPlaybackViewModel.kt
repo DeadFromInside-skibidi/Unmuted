@@ -21,6 +21,15 @@ class AudioPlaybackViewModel(
 
     val playbackState: StateFlow<PlaybackState> = audioPlayer.state
     val recordingState: StateFlow<RecordingState> = audioRecorder.state
+    val radioModeEnabled: StateFlow<Boolean> = audioPlayer.radioModeEnabled
+
+    fun toggleRadioMode() {
+        audioPlayer.toggleRadioMode()
+    }
+
+    fun setRadioMode(enabled: Boolean) {
+        audioPlayer.setRadioMode(enabled)
+    }
 
     fun preloadPostsAudio(posts: List<VoicePost>) {
         val urls = posts.flatMap { post ->
@@ -43,50 +52,17 @@ class AudioPlaybackViewModel(
         if (st.playing) audioPlayer.pause() else audioPlayer.resume()
     }
 
-    fun togglePlayPost(post: VoicePost, autoPlay: Boolean = false) {
+    fun togglePlayPost(
+        post: VoicePost,
+        autoPlay: Boolean = false,
+        queuePosts: List<VoicePost> = emptyList()
+    ) {
         val audioUrl = post.effectiveAudioUrl()
         if (audioUrl.isNullOrBlank()) {
             messageBus.emit("This post has no audio clip attached.")
             return
         }
-        val headline = post.headlineText?.takeIf { it.isNotBlank() }
-            ?: post.captionSegments.firstOrNull()?.text?.take(64)
-            ?: post.transcript.take(64).ifBlank { "Voice by ${post.displaySpeakerName()}" }
-        val roomLabel = post.roomSlug?.takeIf { it.isNotBlank() }?.let { "r/$it" } ?: "Unmuted"
-        val meta = NowPlayingMeta(
-            title = headline,
-            speakerName = post.displaySpeakerName(),
-            subtitle = roomLabel,
-            accentKey = post.authorAccentKey,
-            anonymousMode = post.anonymousMode,
-            avatarBase64 = if (post.anonymousMode) null else post.authorAvatarBase64,
-            sourcePostId = post.id,
-            isClapback = post.hasQuoteClip(),
-            quotedAuthorName = post.quotedAuthorName
-        )
-
-        if (post.hasQuoteClip() && !post.effectiveQuotedAudioUrl().isNullOrBlank()) {
-            audioPlayer.togglePlayClapback(
-                sessionId = "clap_${post.id}",
-                quoteAudioUrl = post.effectiveQuotedAudioUrl()!!,
-                quoteStartMs = post.quotedStartMs,
-                quoteEndMs = post.quotedEndMs,
-                quoteDisguise = post.quotedDisguiseEnum(),
-                mainAudioUrl = audioUrl,
-                mainDurationHintMs = post.durationMs,
-                mainDisguise = post.disguiseEnum(),
-                autoPlay = autoPlay,
-                metadata = meta
-            )
-        } else {
-            audioPlayer.togglePlayRemote(
-                mediaId = audioUrl,
-                audioUrl = audioUrl,
-                disguise = post.disguiseEnum(),
-                autoPlay = autoPlay,
-                metadata = meta
-            )
-        }
+        audioPlayer.playPost(post = post, queue = queuePosts, autoPlay = autoPlay)
     }
 
     fun togglePlayVoiceBio(profile: UserProfile) {

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,8 +61,10 @@ import com.unmuted.app.ui.theme.TitaniumMuted
 @Composable
 fun FloatingMiniPlayerBar(
     playback: PlaybackState,
+    radioModeEnabled: Boolean = playback.radioModeEnabled,
     onTogglePlayPause: () -> Unit,
     onCycleSpeed: () -> Unit,
+    onToggleRadioMode: () -> Unit = {},
     onDismiss: () -> Unit,
     onOpenNowPlaying: () -> Unit,
     allowVisible: Boolean = true,
@@ -212,6 +215,39 @@ fun FloatingMiniPlayerBar(
                                 color = StudioWhite,
                                 modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp)
                             )
+                        }
+
+                        Spacer(Modifier.width(6.dp))
+
+                        Surface(
+                            shape = RoundedCornerShape(9.dp),
+                            color = if (radioModeEnabled) accent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.10f),
+                            border = if (radioModeEnabled) BorderStroke(1.dp, accent.copy(alpha = 0.65f)) else null,
+                            modifier = Modifier
+                                .clickable {
+                                    haptics.trigger(HapticCue.CAPTION_TOGGLE)
+                                    onToggleRadioMode()
+                                }
+                                .testTag("mini_player_radio_btn")
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Radio,
+                                    contentDescription = if (radioModeEnabled) "Radio Mode Enabled" else "Enable Radio Mode",
+                                    tint = if (radioModeEnabled) accent else StudioWhite.copy(alpha = 0.70f),
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "Radio",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = if (radioModeEnabled) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (radioModeEnabled) accent else StudioWhite.copy(alpha = 0.85f)
+                                )
+                            }
                         }
 
                         Spacer(Modifier.width(6.dp))

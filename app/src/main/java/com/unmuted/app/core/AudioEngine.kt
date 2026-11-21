@@ -29,6 +29,7 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
 import com.google.common.util.concurrent.ListenableFuture
 import com.unmuted.app.data.VoiceDisguise
+import com.unmuted.app.data.VoicePost
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -58,6 +59,86 @@ private const val TAG = "AudioEngine"
 
 @Volatile
 private var activeAppContext: Context? = null
+
+@OptIn(UnstableApi::class)
+class StudioVoiceAudioProcessor : BaseAudioProcessor() {
+    private var hpPrevSample: Float = 0f
+    private var hpPrevInput: Float = 0f
+    private var hpAlpha: Float = 0.98f
+    private var runningRmsSq: Float = 0.025f
+    private var currentGain: Float = 1.0f
+
+    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
+        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) {
+            throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
+        }
+        val sampleRate = if (inputAudioFormat.sampleRate > 0) inputAudioFormat.sampleRate else 22050
+        val rc = 1.0 / (2.0 * Math.PI * 80.0)
+        val dt = 1.0 / sampleRate.toDouble()
+        hpAlpha = (rc / (rc + dt)).toFloat().coerceIn(0.85f, 0.999f)
+        return inputAudioFormat
+    }
+
+    override fun queueInput(inputBuffer: ByteBuffer) {
+        val remaining = inputBuffer.remaining()
+        if (remaining == 0) return
+        val outputBuffer = replaceOutputBuffer(remaining)
+
+        val targetRms = 0.16f // Conversational target: ~ -16 dBFS RMS
+        val maxGain = 3.5f
+        val minGain = 0.7f
+        val ceiling = 0.891f // Hard ceiling at -1 dBFS
+
+        while (inputBuffer.hasRemaining()) {
+            val rawSample = inputBuffer.short
+            val floatSample = rawSample.toFloat() / 32768.0f
+
+            // 1. First-order 80 Hz high-pass filter
+            val hpOut = hpAlpha * (hpPrevSample + floatSample - hpPrevInput)
+            hpPrevInput = floatSample
+            hpPrevSample = hpOut
+
+            // 2. Running RMS envelope follower
+            val sampleSq = hpOut * hpOut
+            runningRmsSq = 0.998f * runningRmsSq + 0.002f * sampleSq
+            val estRms = kotlin.math.sqrt(runningRmsSq.toDouble()).toFloat().coerceAtLeast(0.001f)
+
+            // 3. Smooth automatic gain targeting -16 dBFS RMS
+            val targetGain = (targetRms / estRms).coerceIn(minGain, maxGain)
+            currentGain = 0.9992f * currentGain + 0.0008f * targetGain
+
+            val gained = hpOut * currentGain
+
+            // 4. Soft-knee compression + peak limiter
+            val absGained = kotlin.math.abs(gained)
+            val processed = if (absGained <= 0.65f) {
+                gained
+            } else {
+                val excess = absGained - 0.65f
+                val compressed = 0.65f + 0.241f * kotlin.math.tanh((excess / 0.35f).toDouble()).toFloat()
+                (if (gained < 0f) -compressed else compressed).coerceIn(-ceiling, ceiling)
+            }
+
+            val outShort = (processed * 32767.0f).toInt().coerceIn(-32768, 32767).toShort()
+            outputBuffer.putShort(outShort)
+        }
+        outputBuffer.flip()
+    }
+
+    override fun onReset() {
+        hpPrevSample = 0f
+        hpPrevInput = 0f
+        runningRmsSq = 0.025f
+        currentGain = 1.0f
+    }
+
+    override fun onFlush() {
+        hpPrevSample = 0f
+        hpPrevInput = 0f
+        runningRmsSq = 0.025f
+        currentGain = 1.0f
+    }
+}
 
 @OptIn(UnstableApi::class)
 class VoiceDisguiseDspAudioProcessor(private val disguise: VoiceDisguise) : BaseAudioProcessor() {
@@ -147,57 +228,79 @@ suspend fun bakeVoiceDisguise(
     inputFile: File,
     disguise: VoiceDisguise
 ): File {
-    if (disguise == VoiceDisguise.NONE || !inputFile.exists() || inputFile.length() == 0L) {
+    if (!inputFile.exists() || inputFile.length() == 0L) {
         return inputFile
     }
-    if (inputFile.name.startsWith("masked_${disguise.name}_")) {
+    val prefix = if (disguise == VoiceDisguise.NONE) "studio_clean_" else "masked_${disguise.name}_"
+    if (inputFile.name.startsWith(prefix)) {
         return inputFile
     }
 
     val audioDir = File(context.cacheDir, "recordings").apply { mkdirs() }
-    val outputFile = File(audioDir, "masked_${disguise.name}_${System.currentTimeMillis()}.m4a")
+    val outputFile = File(audioDir, "${prefix}${System.currentTimeMillis()}.m4a")
 
     return withContext(Dispatchers.Main) {
-        val sonic = SonicAudioProcessor().apply {
-            setPitch(disguise.pitchFactor)
-            setSpeed(1.0f)
-        }
-        val dsp = VoiceDisguiseDspAudioProcessor(disguise)
-        val editedMediaItem = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(inputFile)))
-            .setEffects(Effects(listOf(sonic, dsp), emptyList()))
-            .build()
-
-        val transformer = Transformer.Builder(context.applicationContext)
-            .build()
-
-        suspendCancellableCoroutine<Unit> { continuation ->
-            val listener = object : Transformer.Listener {
-                override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-                    if (continuation.isActive) continuation.resume(Unit)
+        var bakeSuccess = false
+        try {
+            val processors = mutableListOf<AudioProcessor>()
+            if (disguise != VoiceDisguise.NONE) {
+                val sonic = SonicAudioProcessor().apply {
+                    setPitch(disguise.pitchFactor)
+                    setSpeed(1.0f)
                 }
+                val dsp = VoiceDisguiseDspAudioProcessor(disguise)
+                processors.add(sonic)
+                processors.add(dsp)
+            }
+            // Studio voice cleanup (80Hz HPF + AGC + soft-knee compressor + -1 dBFS peak limiter) runs on ALL takes
+            processors.add(StudioVoiceAudioProcessor())
 
-                override fun onError(
-                    composition: Composition,
-                    exportResult: ExportResult,
-                    exportException: ExportException
-                ) {
-                    if (continuation.isActive) continuation.resumeWithException(exportException)
+            val editedMediaItem = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(inputFile)))
+                .setEffects(Effects(processors, emptyList()))
+                .build()
+
+            val transformer = Transformer.Builder(context.applicationContext)
+                .build()
+
+            suspendCancellableCoroutine<Unit> { continuation ->
+                val listener = object : Transformer.Listener {
+                    override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                        if (continuation.isActive) continuation.resume(Unit)
+                    }
+
+                    override fun onError(
+                        composition: Composition,
+                        exportResult: ExportResult,
+                        exportException: ExportException
+                    ) {
+                        if (continuation.isActive) continuation.resumeWithException(exportException)
+                    }
+                }
+                transformer.addListener(listener)
+                continuation.invokeOnCancellation {
+                    runCatching { transformer.cancel() }
+                }
+                transformer.start(editedMediaItem, outputFile.absolutePath)
+            }
+
+            if (outputFile.exists() && outputFile.length() > 0L) {
+                bakeSuccess = true
+                if (inputFile.absolutePath != outputFile.absolutePath) {
+                    runCatching { inputFile.delete() }
+                }
+                outputFile
+            } else {
+                throw IllegalStateException("Baking voice audio produced an empty output file.")
+            }
+        } finally {
+            if (!bakeSuccess) {
+                if (outputFile.exists()) {
+                    runCatching { outputFile.delete() }
+                }
+                if (inputFile.exists()) {
+                    runCatching { inputFile.delete() }
                 }
             }
-            transformer.addListener(listener)
-            continuation.invokeOnCancellation {
-                runCatching { transformer.cancel() }
-            }
-            transformer.start(editedMediaItem, outputFile.absolutePath)
-        }
-
-        if (outputFile.exists() && outputFile.length() > 0L) {
-            if (inputFile.absolutePath != outputFile.absolutePath) {
-                runCatching { inputFile.delete() }
-            }
-            outputFile
-        } else {
-            inputFile
         }
     }
 }
@@ -206,12 +309,8 @@ suspend fun bakeVoiceDisguise(
     inputFile: File,
     disguise: VoiceDisguise
 ): File {
-    val ctx = activeAppContext
-    return if (ctx != null) {
-        bakeVoiceDisguise(ctx, inputFile, disguise)
-    } else {
-        inputFile
-    }
+    val ctx = activeAppContext ?: throw IllegalStateException("Application context unavailable for voice processing.")
+    return bakeVoiceDisguise(ctx, inputFile, disguise)
 }
 
 data class RecordingState(
@@ -251,24 +350,46 @@ class AudioRecorderController(private val context: Context) {
         currentFile = file
 
         try {
-            val mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(context)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
+            val audioSourceToTry = listOf(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                MediaRecorder.AudioSource.MIC
+            )
+            var startedRecorder: MediaRecorder? = null
+            var lastErr: Exception? = null
+
+            for (src in audioSourceToTry) {
+                val mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    MediaRecorder(context)
+                } else {
+                    @Suppress("DEPRECATION")
+                    MediaRecorder()
+                }
+                try {
+                    mediaRecorder.apply {
+                        setAudioSource(src)
+                        setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                        setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                        setAudioSamplingRate(22050)
+                        setAudioEncodingBitRate(32000)
+                        setAudioChannels(1)
+                        setOutputFile(file.absolutePath)
+                        prepare()
+                        start()
+                    }
+                    startedRecorder = mediaRecorder
+                    break
+                } catch (e: Exception) {
+                    lastErr = e
+                    runCatching { mediaRecorder.reset() }
+                    runCatching { mediaRecorder.release() }
+                }
             }
-            mediaRecorder.apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioSamplingRate(22050)
-                setAudioEncodingBitRate(24000)
-                setAudioChannels(1)
-                setOutputFile(file.absolutePath)
-                prepare()
-                start()
+
+            if (startedRecorder == null) {
+                throw lastErr ?: IllegalStateException("Unable to start audio recording.")
             }
-            recorder = mediaRecorder
+
+            recorder = startedRecorder
             segmentStartMs = System.currentTimeMillis()
             _state.value = RecordingState(
                 recording = true,
@@ -438,6 +559,7 @@ data class PlaybackState(
     val combinedPositionMs: Long = 0L,
     val combinedDurationMs: Long = 0L,
     val nowPlaying: NowPlayingMeta? = null,
+    val radioModeEnabled: Boolean = false,
     val error: String? = null
 )
 
@@ -463,6 +585,12 @@ class AudioPlayerManager(private val context: Context) {
     private var progressJob: Job? = null
     private var loadJob: Job? = null
     private var activeClapback: ClapbackSessionMeta? = null
+
+    private val _radioModeEnabled = MutableStateFlow(false)
+    val radioModeEnabled: StateFlow<Boolean> = _radioModeEnabled.asStateFlow()
+
+    private val postMap = ConcurrentHashMap<String, VoicePost>()
+    private var cachedQueue: List<VoicePost> = emptyList()
 
     private val _state = MutableStateFlow(PlaybackState())
     val state: StateFlow<PlaybackState> = _state.asStateFlow()
@@ -505,6 +633,42 @@ class AudioPlayerManager(private val context: Context) {
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val ctrl = mediaController ?: return
+            val postId = mediaItem?.mediaId
+            if (!postId.isNullOrBlank()) {
+                val post = postMap[postId]
+                val meta = if (post != null) {
+                    val headline = post.headlineText?.takeIf { it.isNotBlank() }
+                        ?: post.captionSegments.firstOrNull()?.text?.take(64)
+                        ?: post.transcript.take(64).ifBlank { "Voice by ${post.displaySpeakerName()}" }
+                    val roomLabel = post.roomSlug?.takeIf { it.isNotBlank() }?.let { "r/$it" } ?: "Unmuted"
+                    NowPlayingMeta(
+                        title = headline,
+                        speakerName = post.displaySpeakerName(),
+                        subtitle = roomLabel,
+                        accentKey = post.authorAccentKey,
+                        anonymousMode = post.anonymousMode,
+                        avatarBase64 = if (post.anonymousMode) null else post.authorAvatarBase64,
+                        sourcePostId = post.id,
+                        isClapback = post.hasQuoteClip(),
+                        quotedAuthorName = post.quotedAuthorName
+                    )
+                } else {
+                    val md = mediaItem.mediaMetadata
+                    NowPlayingMeta(
+                        title = md.title?.toString() ?: "Unmuted Voice",
+                        speakerName = md.artist?.toString() ?: "Unmuted Speaker",
+                        subtitle = md.albumTitle?.toString() ?: "Unmuted",
+                        sourcePostId = postId
+                    )
+                }
+                val disguise = post?.disguiseEnum() ?: VoiceDisguise.NONE
+                _state.value = _state.value.copy(
+                    activeMediaId = postId,
+                    nowPlaying = meta,
+                    voiceDisguise = disguise,
+                    activePhase = PlaybackPhase.MAIN
+                )
+            }
             syncStateFromController(ctrl)
         }
     }
@@ -560,6 +724,234 @@ class AudioPlayerManager(private val context: Context) {
 
     fun preloadAudioClips(mediaIds: List<String> = emptyList()) {
         // Handled natively by ExoPlayer SimpleCache
+    }
+
+    fun updateCachedQueue(queue: List<VoicePost>) {
+        if (queue.isNotEmpty()) {
+            cachedQueue = queue
+            for (p in queue) postMap[p.id] = p
+        }
+    }
+
+    fun setRadioMode(enabled: Boolean, activeList: List<VoicePost> = emptyList()) {
+        _radioModeEnabled.value = enabled
+        _state.value = _state.value.copy(radioModeEnabled = enabled)
+        if (activeList.isNotEmpty()) {
+            cachedQueue = activeList
+            for (p in activeList) postMap[p.id] = p
+        }
+        sendRadioModeCommand(enabled)
+        syncQueueToController()
+    }
+
+    fun toggleRadioMode(activeList: List<VoicePost> = emptyList()) {
+        setRadioMode(!_radioModeEnabled.value, activeList)
+    }
+
+    private fun sendRadioModeCommand(enabled: Boolean) {
+        val ctrl = mediaController ?: return
+        val args = Bundle().apply {
+            putBoolean(PlaybackSessionContract.EXTRA_RADIO_MODE, enabled)
+        }
+        val cmd = SessionCommand(PlaybackSessionContract.ACTION_SET_RADIO_MODE, Bundle.EMPTY)
+        try {
+            ctrl.sendCustomCommand(cmd, args)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed sending radio mode command", e)
+        }
+    }
+
+    private fun syncQueueToController() {
+        val ctrl = mediaController ?: return
+        if (ctrl.mediaItemCount == 0 || !_state.value.playing) return
+
+        if (_radioModeEnabled.value) {
+            val currentId = _state.value.activeMediaId ?: return
+            val postIdx = cachedQueue.indexOfFirst { it.id == currentId }
+            val upcoming = if (postIdx != -1) cachedQueue.drop(postIdx + 1) else cachedQueue.filter { it.id != currentId }
+            val existingIds = mutableSetOf<String>()
+            for (i in 0 until ctrl.mediaItemCount) {
+                existingIds.add(ctrl.getMediaItemAt(i).mediaId)
+            }
+            val toAdd = upcoming.filter { it.id !in existingIds && !it.effectiveAudioUrl().isNullOrBlank() }
+                .mapNotNull { buildPostMediaItem(it, _state.value.speed) }
+            if (toAdd.isNotEmpty()) {
+                ctrl.addMediaItems(toAdd)
+            }
+        } else {
+            val nextIdx = ctrl.currentMediaItemIndex + 1
+            if (ctrl.mediaItemCount > nextIdx) {
+                ctrl.removeMediaItems(nextIdx, ctrl.mediaItemCount)
+            }
+        }
+    }
+
+    fun buildPostMediaItem(post: VoicePost, speed: Float = 1.0f): MediaItem? {
+        val audioUrl = post.effectiveAudioUrl() ?: return null
+        val headline = post.headlineText?.takeIf { it.isNotBlank() }
+            ?: post.captionSegments.firstOrNull()?.text?.take(64)
+            ?: post.transcript.take(64).ifBlank { "Voice by ${post.displaySpeakerName()}" }
+        val roomLabel = post.roomSlug?.takeIf { it.isNotBlank() }?.let { "r/$it" } ?: "Unmuted"
+
+        val meta = NowPlayingMeta(
+            title = headline,
+            speakerName = post.displaySpeakerName(),
+            subtitle = roomLabel,
+            accentKey = post.authorAccentKey,
+            anonymousMode = post.anonymousMode,
+            avatarBase64 = if (post.anonymousMode) null else post.authorAvatarBase64,
+            sourcePostId = post.id,
+            isClapback = post.hasQuoteClip(),
+            quotedAuthorName = post.quotedAuthorName
+        )
+
+        val extras = Bundle().apply {
+            putString(PlaybackSessionContract.EXTRA_VOICE_DISGUISE, post.disguiseEnum().name)
+            putFloat(PlaybackSessionContract.EXTRA_BASE_SPEED, speed)
+            putString(PlaybackSessionContract.EXTRA_SESSION_MEDIA_ID, post.id)
+            putBoolean(PlaybackSessionContract.EXTRA_RADIO_MODE, _radioModeEnabled.value)
+        }
+
+        val artworkBytes = if (!meta.anonymousMode && !meta.avatarBase64.isNullOrBlank()) {
+            runCatching { Base64.decode(meta.avatarBase64, Base64.DEFAULT) }.getOrNull()
+        } else null
+
+        val metadataBuilder = MediaMetadata.Builder()
+            .setTitle(meta.title.ifBlank { "Unmuted Voice" })
+            .setArtist(meta.speakerName.ifBlank { "Unmuted Speaker" })
+            .setAlbumTitle(meta.subtitle.ifBlank { "Unmuted" })
+            .setExtras(extras)
+        if (artworkBytes != null && artworkBytes.isNotEmpty()) {
+            metadataBuilder.setArtworkData(artworkBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+        }
+
+        return MediaItem.Builder()
+            .setMediaId(post.id)
+            .setUri(Uri.parse(audioUrl))
+            .setMediaMetadata(metadataBuilder.build())
+            .build()
+    }
+
+    fun playPost(
+        post: VoicePost,
+        queue: List<VoicePost> = emptyList(),
+        autoPlay: Boolean = false
+    ) {
+        val audioUrl = post.effectiveAudioUrl() ?: return
+        postMap[post.id] = post
+        if (queue.isNotEmpty()) {
+            cachedQueue = queue
+            for (p in queue) postMap[p.id] = p
+        }
+
+        if (post.hasQuoteClip() && !post.effectiveQuotedAudioUrl().isNullOrBlank()) {
+            val headline = post.headlineText?.takeIf { it.isNotBlank() }
+                ?: post.captionSegments.firstOrNull()?.text?.take(64)
+                ?: post.transcript.take(64).ifBlank { "Voice by ${post.displaySpeakerName()}" }
+            val roomLabel = post.roomSlug?.takeIf { it.isNotBlank() }?.let { "r/$it" } ?: "Unmuted"
+            val meta = NowPlayingMeta(
+                title = headline,
+                speakerName = post.displaySpeakerName(),
+                subtitle = roomLabel,
+                accentKey = post.authorAccentKey,
+                anonymousMode = post.anonymousMode,
+                avatarBase64 = if (post.anonymousMode) null else post.authorAvatarBase64,
+                sourcePostId = post.id,
+                isClapback = true,
+                quotedAuthorName = post.quotedAuthorName
+            )
+            togglePlayClapback(
+                sessionId = "clap_${post.id}",
+                quoteAudioUrl = post.effectiveQuotedAudioUrl()!!,
+                quoteStartMs = post.quotedStartMs,
+                quoteEndMs = post.quotedEndMs,
+                quoteDisguise = post.quotedDisguiseEnum(),
+                mainAudioUrl = audioUrl,
+                mainDurationHintMs = post.durationMs,
+                mainDisguise = post.disguiseEnum(),
+                autoPlay = autoPlay,
+                metadata = meta
+            )
+            return
+        }
+
+        val current = _state.value
+        val ctrl = mediaController
+        if ((current.activeMediaId == post.id || current.activeMediaId == audioUrl) && ctrl != null && ctrl.mediaItemCount > 0 && activeClapback == null) {
+            if (!autoPlay) {
+                if (ctrl.isPlaying) pause() else resume()
+            } else if (!ctrl.isPlaying) {
+                resume()
+            }
+            return
+        }
+
+        loadJob?.cancel()
+        loadJob = scope.launch {
+            activeClapback = null
+            val headline = post.headlineText?.takeIf { it.isNotBlank() }
+                ?: post.captionSegments.firstOrNull()?.text?.take(64)
+                ?: post.transcript.take(64).ifBlank { "Voice by ${post.displaySpeakerName()}" }
+            val roomLabel = post.roomSlug?.takeIf { it.isNotBlank() }?.let { "r/$it" } ?: "Unmuted"
+            val meta = NowPlayingMeta(
+                title = headline,
+                speakerName = post.displaySpeakerName(),
+                subtitle = roomLabel,
+                accentKey = post.authorAccentKey,
+                anonymousMode = post.anonymousMode,
+                avatarBase64 = if (post.anonymousMode) null else post.authorAvatarBase64,
+                sourcePostId = post.id,
+                isClapback = false,
+                quotedAuthorName = post.quotedAuthorName
+            )
+
+            _state.value = current.copy(
+                activeMediaId = post.id,
+                buffering = true,
+                playing = false,
+                positionMs = 0L,
+                combinedPositionMs = 0L,
+                combinedDurationMs = 0L,
+                quoteSplitFraction = 0f,
+                activePhase = PlaybackPhase.MAIN,
+                voiceDisguise = post.disguiseEnum(),
+                nowPlaying = meta,
+                radioModeEnabled = _radioModeEnabled.value,
+                error = null
+            )
+
+            try {
+                val controller = awaitController() ?: return@launch
+                val primaryItem = buildPostMediaItem(post, _state.value.speed) ?: return@launch
+                val mediaItems = mutableListOf(primaryItem)
+
+                if (_radioModeEnabled.value && cachedQueue.isNotEmpty()) {
+                    val postIdx = cachedQueue.indexOfFirst { it.id == post.id }
+                    val upcoming = if (postIdx != -1) cachedQueue.drop(postIdx + 1) else cachedQueue.filter { it.id != post.id }
+                    for (up in upcoming) {
+                        if (up.id != post.id && !up.effectiveAudioUrl().isNullOrBlank()) {
+                            postMap[up.id] = up
+                            buildPostMediaItem(up, _state.value.speed)?.let { mediaItems.add(it) }
+                        }
+                    }
+                }
+
+                controller.setMediaItems(mediaItems, 0, 0L)
+                controller.prepare()
+                sendAudioParams(controller, _state.value.speed, post.disguiseEnum())
+                controller.play()
+                startProgressTicker()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Post playback failed", e)
+                _state.value = PlaybackState(
+                    speed = _state.value.speed,
+                    radioModeEnabled = _radioModeEnabled.value,
+                    error = e.localizedMessage ?: "Audio clip could not be played."
+                )
+            }
+        }
     }
 
     fun togglePlayLocalFile(
@@ -954,7 +1346,7 @@ class AudioPlayerManager(private val context: Context) {
             ctrl.stop()
             ctrl.clearMediaItems()
         }
-        _state.value = PlaybackState(speed = _state.value.speed)
+        _state.value = PlaybackState(speed = _state.value.speed, radioModeEnabled = _radioModeEnabled.value)
     }
 
     private fun startProgressTicker() {
@@ -994,17 +1386,22 @@ class AudioPlayerManager(private val context: Context) {
                 quoteSplitFraction = split,
                 combinedPositionMs = combinedPos,
                 combinedDurationMs = totalDur,
-                voiceDisguise = phaseDisguise
+                voiceDisguise = phaseDisguise,
+                radioModeEnabled = _radioModeEnabled.value
             )
         } else {
+            val currentItem = ctrl.currentMediaItem
+            val activeId = currentItem?.mediaId ?: _state.value.activeMediaId
             _state.value = _state.value.copy(
+                activeMediaId = activeId,
                 playing = ctrl.isPlaying,
                 buffering = ctrl.playbackState == Player.STATE_BUFFERING,
                 positionMs = pos,
                 durationMs = rawDur,
                 combinedPositionMs = pos,
                 combinedDurationMs = rawDur,
-                activePhase = PlaybackPhase.MAIN
+                activePhase = PlaybackPhase.MAIN,
+                radioModeEnabled = _radioModeEnabled.value
             )
         }
     }

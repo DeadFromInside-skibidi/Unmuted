@@ -30,6 +30,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 
 private const val SERVICE_TAG = "UnmutedPlaybackService"
@@ -38,7 +41,9 @@ object PlaybackSessionContract {
     const val EXTRA_VOICE_DISGUISE = "unmuted.extra.VOICE_DISGUISE"
     const val EXTRA_BASE_SPEED = "unmuted.extra.BASE_SPEED"
     const val EXTRA_SESSION_MEDIA_ID = "unmuted.extra.SESSION_MEDIA_ID"
+    const val EXTRA_RADIO_MODE = "unmuted.extra.RADIO_MODE"
     const val ACTION_APPLY_AUDIO_PARAMS = "unmuted.action.APPLY_AUDIO_PARAMS"
+    const val ACTION_SET_RADIO_MODE = "unmuted.action.SET_RADIO_MODE"
 }
 
 @OptIn(UnstableApi::class)
@@ -67,7 +72,11 @@ class UnmutedPlaybackService : MediaSessionService() {
 
     private var currentBaseSpeed: Float = 1.0f
 
+    private val _radioModeEnabled = MutableStateFlow(false)
+    val radioModeEnabled: StateFlow<Boolean> = _radioModeEnabled.asStateFlow()
+
     private val applyParamsCommand = SessionCommand(PlaybackSessionContract.ACTION_APPLY_AUDIO_PARAMS, Bundle.EMPTY)
+    private val setRadioModeCommand = SessionCommand(PlaybackSessionContract.ACTION_SET_RADIO_MODE, Bundle.EMPTY)
 
     override fun onCreate() {
         super.onCreate()
@@ -120,6 +129,7 @@ class UnmutedPlaybackService : MediaSessionService() {
                 val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS
                     .buildUpon()
                     .add(applyParamsCommand)
+                    .add(setRadioModeCommand)
                     .build()
                 return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                     .setAvailableSessionCommands(sessionCommands)
@@ -142,6 +152,10 @@ class UnmutedPlaybackService : MediaSessionService() {
                             Log.w(SERVICE_TAG, "PlaybackParameters update failed", e)
                         }
                     }
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                } else if (customCommand.customAction == PlaybackSessionContract.ACTION_SET_RADIO_MODE) {
+                    val enabled = args.getBoolean(PlaybackSessionContract.EXTRA_RADIO_MODE, false)
+                    _radioModeEnabled.value = enabled
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
                 return super.onCustomCommand(session, controller, customCommand, args)

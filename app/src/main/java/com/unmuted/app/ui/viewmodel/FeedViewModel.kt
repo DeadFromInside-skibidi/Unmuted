@@ -2,6 +2,7 @@ package com.unmuted.app.ui.viewmodel
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -386,14 +387,22 @@ class FeedViewModel(
             } else {
                 draft.voiceDisguise
             }
-            val readyFile = if (effectiveDisguise != VoiceDisguise.NONE) {
-                try {
+            val readyFile: File
+            try {
+                readyFile = if (effectiveDisguise != VoiceDisguise.NONE) {
                     bakeVoiceDisguise(appContext, file, effectiveDisguise)
-                } catch (_: Exception) {
+                } else {
                     file
                 }
-            } else {
-                file
+            } catch (e: Exception) {
+                Log.e("AudioEngine", "Voice disguise baking failed", e)
+                runCatching { file.delete() }
+                _composerState.value = _composerState.value.copy(
+                    transcribing = false,
+                    transcriptionError = "Voice masking failed. Recording was not uploaded to protect your identity."
+                )
+                showMessage("Voice masking failed. Recording was not uploaded to protect your identity.")
+                return@launch
             }
             _composerState.value = _composerState.value.copy(
                 recordedFile = readyFile,
@@ -410,10 +419,12 @@ class FeedViewModel(
                     )
                 },
                 onFailure = { err ->
+                    Log.e("TranscriptionService", "Caption generation failed for composer post", err)
                     _composerState.value = _composerState.value.copy(
                         transcribing = false,
                         transcriptionError = err.message ?: "Transcription failed."
                     )
+                    showMessage("Could not generate captions. You can still publish your voice.")
                 }
             )
         }
@@ -447,97 +458,118 @@ class FeedViewModel(
             } else {
                 draft.voiceDisguise
             }
-            val uploadFile = if (effectiveDisguise != VoiceDisguise.NONE) {
+            var bakedFile: File? = null
+            var uploadFile = file
+            try {
                 try {
-                    bakeVoiceDisguise(appContext, file, effectiveDisguise)
-                } catch (_: Exception) {
-                    file
-                }
-            } else {
-                file
-            }
-            _composerState.value = _composerState.value.copy(recordedFile = uploadFile)
-            val tempPostId = nextReverseChronoId("post")
-            val uploadResult = audioStorageRepository.uploadPostAudio(tempPostId, uploadFile)
-            val audioUrl = uploadResult.getOrElse { err ->
-                _composerState.value = _composerState.value.copy(
-                    publishing = false,
-                    publishError = err.localizedMessage ?: "Audio upload failed."
-                )
-                return@launch
-            }
-
-            val parsedTags = draft.hashtagsInput
-                .split(Regex("[,\\s]+"))
-                .map { it.trim().removePrefix("#") }
-                .filter { it.isNotEmpty() }
-                .take(8)
-
-            val customAlias = if (draft.anonymousMode || draft.selectedRoom?.anonymousRoom == true) {
-                AliasGenerator.generateForRoom(currentUid, draft.selectedRoom?.id ?: "global_unfiltered", draft.burnerNonce)
-            } else null
-
-            val qPost = draft.quotedPost
-            val quotedSliceTranscript = if (qPost != null) {
-                val matchingSegs = qPost.captionSegments.filter { seg ->
-                    seg.endMs >= draft.quoteStartMs && seg.startMs <= draft.quoteEndMs
-                }
-                if (matchingSegs.isNotEmpty()) matchingSegs.joinToString(" ") { it.text }
-                else qPost.transcript.take(200)
-            } else null
-
-            val quotedSlicePeaks = if (qPost != null && qPost.waveformPeaks.isNotEmpty() && qPost.durationMs > 0L) {
-                val total = qPost.waveformPeaks.size
-                val sIdx = ((draft.quoteStartMs.toFloat() / qPost.durationMs) * total).toInt().coerceIn(0, total - 1)
-                val eIdx = ((draft.quoteEndMs.toFloat() / qPost.durationMs) * total).toInt().coerceIn(sIdx + 1, total)
-                qPost.waveformPeaks.subList(sIdx, eIdx).map { it.toFloat() }
-            } else emptyList()
-
-            val postResult = feedRepository.createVoicePost(
-                author = author,
-                postKind = draft.postKind,
-                audioUrl = audioUrl,
-                durationMs = draft.durationMs,
-                waveformPeaks = draft.waveformPeaks,
-                transcript = draft.transcript,
-                captionSegments = draft.captionSegments,
-                room = draft.selectedRoom,
-                anonymousMode = draft.anonymousMode,
-                voiceDisguise = draft.voiceDisguise,
-                headlineText = draft.headlineText,
-                attachmentImageBase64 = draft.attachmentImageBase64,
-                hashtags = parsedTags,
-                customAnonymousAlias = customAlias,
-                hotTakeMode = draft.hotTakeMode,
-                quotedPost = qPost,
-                quotedStartMs = draft.quoteStartMs,
-                quotedEndMs = draft.quoteEndMs,
-                quotedTranscript = quotedSliceTranscript,
-                quotedWaveformPeaks = quotedSlicePeaks,
-                explicitPostId = tempPostId
-            )
-
-            postResult.fold(
-                onSuccess = {
-                    audioPlayer.stop()
-                    audioRecorder.reset()
-                    _composerState.value = ComposerDraftState()
-                    showMessage(
-                        when {
-                            qPost != null -> "Voice Clapback published!"
-                            draft.hotTakeMode -> "Hot Take Debate is live!"
-                            else -> "Voice published to Unmuted!"
-                        }
+                    uploadFile = bakeVoiceDisguise(appContext, file, effectiveDisguise)
+                    bakedFile = uploadFile
+                } catch (e: Exception) {
+                    Log.e("FeedViewModel", "Voice processing failed", e)
+                    val errorMsg = if (effectiveDisguise != VoiceDisguise.NONE) {
+                        "Voice masking failed. Recording was not uploaded to protect your identity."
+                    } else {
+                        "Studio audio processing failed. Recording was not uploaded."
+                    }
+                    _composerState.value = draft.copy(
+                        publishing = false,
+                        publishError = errorMsg
                     )
-                    onPublished()
-                },
-                onFailure = { err ->
+                    showMessage(errorMsg)
+                    runCatching { file.delete() }
+                    return@launch
+                }
+                _composerState.value = _composerState.value.copy(recordedFile = uploadFile)
+                val tempPostId = nextReverseChronoId("post")
+                val uploadResult = audioStorageRepository.uploadPostAudio(tempPostId, uploadFile)
+                val audioUrl = uploadResult.getOrElse { err ->
                     _composerState.value = _composerState.value.copy(
                         publishing = false,
-                        publishError = err.localizedMessage ?: "Could not publish post."
+                        publishError = err.localizedMessage ?: "Audio upload failed."
                     )
+                    return@launch
                 }
-            )
+
+                val parsedTags = draft.hashtagsInput
+                    .split(Regex("[,\\s]+"))
+                    .map { it.trim().removePrefix("#") }
+                    .filter { it.isNotEmpty() }
+                    .take(8)
+
+                val customAlias = if (draft.anonymousMode || draft.selectedRoom?.anonymousRoom == true) {
+                    AliasGenerator.generateForRoom(currentUid, draft.selectedRoom?.id ?: "global_unfiltered", draft.burnerNonce)
+                } else null
+
+                val qPost = draft.quotedPost
+                val quotedSliceTranscript = if (qPost != null) {
+                    val matchingSegs = qPost.captionSegments.filter { seg ->
+                        seg.endMs >= draft.quoteStartMs && seg.startMs <= draft.quoteEndMs
+                    }
+                    if (matchingSegs.isNotEmpty()) matchingSegs.joinToString(" ") { it.text }
+                    else qPost.transcript.take(200)
+                } else null
+
+                val quotedSlicePeaks = if (qPost != null && qPost.waveformPeaks.isNotEmpty() && qPost.durationMs > 0L) {
+                    val total = qPost.waveformPeaks.size
+                    val sIdx = ((draft.quoteStartMs.toFloat() / qPost.durationMs) * total).toInt().coerceIn(0, total - 1)
+                    val eIdx = ((draft.quoteEndMs.toFloat() / qPost.durationMs) * total).toInt().coerceIn(sIdx + 1, total)
+                    qPost.waveformPeaks.subList(sIdx, eIdx).map { it.toFloat() }
+                } else emptyList()
+
+                val postResult = feedRepository.createVoicePost(
+                    author = author,
+                    postKind = draft.postKind,
+                    audioUrl = audioUrl,
+                    durationMs = draft.durationMs,
+                    waveformPeaks = draft.waveformPeaks,
+                    transcript = draft.transcript,
+                    captionSegments = draft.captionSegments,
+                    room = draft.selectedRoom,
+                    anonymousMode = draft.anonymousMode,
+                    voiceDisguise = draft.voiceDisguise,
+                    headlineText = draft.headlineText,
+                    attachmentImageBase64 = draft.attachmentImageBase64,
+                    hashtags = parsedTags,
+                    customAnonymousAlias = customAlias,
+                    hotTakeMode = draft.hotTakeMode,
+                    quotedPost = qPost,
+                    quotedStartMs = draft.quoteStartMs,
+                    quotedEndMs = draft.quoteEndMs,
+                    quotedTranscript = quotedSliceTranscript,
+                    quotedWaveformPeaks = quotedSlicePeaks,
+                    explicitPostId = tempPostId
+                )
+
+                postResult.fold(
+                    onSuccess = {
+                        audioPlayer.stop()
+                        audioRecorder.reset()
+                        _composerState.value = ComposerDraftState()
+                        showMessage(
+                            when {
+                                qPost != null -> "Voice Clapback published!"
+                                draft.hotTakeMode -> "Hot Take Debate is live!"
+                                else -> "Voice published to Unmuted!"
+                            }
+                        )
+                        runCatching { file.delete() }
+                        if (uploadFile != file) {
+                            runCatching { uploadFile.delete() }
+                        }
+                        onPublished()
+                    },
+                    onFailure = { err ->
+                        _composerState.value = _composerState.value.copy(
+                            publishing = false,
+                            publishError = err.localizedMessage ?: "Could not publish post."
+                        )
+                    }
+                )
+            } finally {
+                if (bakedFile != null && bakedFile != file) {
+                    runCatching { bakedFile.delete() }
+                }
+            }
         }
     }
 
@@ -673,46 +705,63 @@ class FeedViewModel(
             } else {
                 disguise
             }
-            val readyFile = if (effectiveDisguise != VoiceDisguise.NONE) {
+            var bakedFile: File? = null
+            var readyFile = audioFile
+            try {
                 try {
-                    bakeVoiceDisguise(appContext, audioFile, effectiveDisguise)
-                } catch (_: Exception) {
-                    audioFile
+                    readyFile = bakeVoiceDisguise(appContext, audioFile, effectiveDisguise)
+                    bakedFile = readyFile
+                } catch (e: Exception) {
+                    Log.e("FeedViewModel", "Voice comment processing failed", e)
+                    val errorMsg = if (effectiveDisguise != VoiceDisguise.NONE) {
+                        "Voice masking failed. Recording was not uploaded to protect your identity."
+                    } else {
+                        "Studio audio processing failed. Recording was not uploaded."
+                    }
+                    showMessage(errorMsg)
+                    return@launch
                 }
-            } else {
-                audioFile
-            }
-            val transcriptRes = transcriptionService.transcribeAudioFile(readyFile, durationMs)
-            val tr = transcriptRes.getOrNull()
-            val commentId = "cmt_${UUID.randomUUID().toString().replace("-", "").take(18)}"
-            val uploadRes = audioStorageRepository.uploadCommentAudio(commentId, readyFile)
-            val audioUrl = uploadRes.getOrElse {
-                showMessage("Could not upload voice reply.")
-                return@launch
-            }
-            feedRepository.addComment(
-                post = effectivePost,
-                author = author,
-                textBody = null,
-                audioUrl = audioUrl,
-                durationMs = durationMs,
-                waveformPeaks = peaks,
-                transcript = tr?.transcript ?: "Voice reply",
-                captionSegments = tr?.segments ?: emptyList(),
-                voiceDisguise = effectiveDisguise,
-                stance = stance,
-                explicitCommentId = commentId
-            ).onSuccess {
-                val updated = effectivePost.copy(
-                    commentCount = effectivePost.commentCount + 1L,
-                    agreeCount = effectivePost.agreeCount + if (effectivePost.hotTakeMode && stance == DebateStance.AGREE) 1L else 0L,
-                    disagreeCount = effectivePost.disagreeCount + if (effectivePost.hotTakeMode && stance == DebateStance.DISAGREE) 1L else 0L
-                )
-                _postOverrides.value = _postOverrides.value + (post.id to updated)
-                if (_activeCommentsPost.value?.id == post.id) _activeCommentsPost.value = updated
-                onDone()
-            }.onFailure {
-                showMessage("Could not save voice reply.")
+                val transcriptRes = transcriptionService.transcribeAudioFile(readyFile, durationMs)
+                transcriptRes.onFailure { err ->
+                    Log.e("TranscriptionService", "Voice comment transcription failed", err)
+                    showMessage("Could not generate captions. Posting audio reply.")
+                }
+                val tr = transcriptRes.getOrNull()
+                val commentId = "cmt_${UUID.randomUUID().toString().replace("-", "").take(18)}"
+                val uploadRes = audioStorageRepository.uploadCommentAudio(commentId, readyFile)
+                val audioUrl = uploadRes.getOrElse {
+                    showMessage("Could not upload voice reply.")
+                    return@launch
+                }
+                feedRepository.addComment(
+                    post = effectivePost,
+                    author = author,
+                    textBody = null,
+                    audioUrl = audioUrl,
+                    durationMs = durationMs,
+                    waveformPeaks = peaks,
+                    transcript = tr?.transcript ?: "Voice reply",
+                    captionSegments = tr?.segments ?: emptyList(),
+                    voiceDisguise = effectiveDisguise,
+                    stance = stance,
+                    explicitCommentId = commentId
+                ).onSuccess {
+                    val updated = effectivePost.copy(
+                        commentCount = effectivePost.commentCount + 1L,
+                        agreeCount = effectivePost.agreeCount + if (effectivePost.hotTakeMode && stance == DebateStance.AGREE) 1L else 0L,
+                        disagreeCount = effectivePost.disagreeCount + if (effectivePost.hotTakeMode && stance == DebateStance.DISAGREE) 1L else 0L
+                    )
+                    _postOverrides.value = _postOverrides.value + (post.id to updated)
+                    if (_activeCommentsPost.value?.id == post.id) _activeCommentsPost.value = updated
+                    onDone()
+                }.onFailure {
+                    showMessage("Could not save voice reply.")
+                }
+            } finally {
+                runCatching { audioFile.delete() }
+                if (bakedFile != null && bakedFile != audioFile) {
+                    runCatching { bakedFile.delete() }
+                }
             }
         }
     }
