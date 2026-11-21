@@ -1,6 +1,7 @@
 package com.unmuted.app.data
 
 import androidx.annotation.Keep
+import androidx.compose.runtime.Immutable
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
@@ -182,6 +183,7 @@ data class SafetyReportTarget(
 // --- WORD & PHRASE-LEVEL TIMESTAMPED CAPTIONS ---
 
 @Keep
+@Immutable
 @IgnoreExtraProperties
 data class CaptionWord(
     val startMs: Long = 0L,
@@ -196,6 +198,7 @@ data class CaptionWord(
 }
 
 @Keep
+@Immutable
 @IgnoreExtraProperties
 data class CaptionSegment(
     val startMs: Long = 0L,
@@ -214,6 +217,7 @@ data class CaptionSegment(
 }
 
 @Keep
+@Immutable
 @IgnoreExtraProperties
 data class UserProfile(
     @DocumentId val id: String = "",
@@ -263,6 +267,7 @@ data class JoinedRoom(
 )
 
 @Keep
+@Immutable
 @IgnoreExtraProperties
 data class CommunityRoom(
     @DocumentId val id: String = "",
@@ -285,6 +290,7 @@ data class CommunityRoom(
 }
 
 @Keep
+@Immutable
 @IgnoreExtraProperties
 data class VoicePost(
     @DocumentId val id: String = "",
@@ -413,6 +419,7 @@ data class DiscoverQuery(
 )
 
 @Keep
+@Immutable
 @IgnoreExtraProperties
 data class TrendingAudioTopic(
     val id: String = "",
@@ -427,6 +434,7 @@ data class TrendingAudioTopic(
 )
 
 @Keep
+@Immutable
 @IgnoreExtraProperties
 data class VoiceComment(
     @DocumentId val id: String = "",
@@ -459,6 +467,7 @@ data class VoiceComment(
 }
 
 @Keep
+@Immutable
 @IgnoreExtraProperties
 data class Conversation(
     @DocumentId val id: String = "",
@@ -479,6 +488,7 @@ data class Conversation(
 }
 
 @Keep
+@Immutable
 @IgnoreExtraProperties
 data class DirectMessage(
     @DocumentId val id: String = "",

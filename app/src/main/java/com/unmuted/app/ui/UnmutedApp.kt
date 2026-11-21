@@ -77,6 +77,8 @@ import com.unmuted.app.ui.components.HapticCue
 import com.unmuted.app.ui.components.SafetyControlsBottomSheet
 import com.unmuted.app.ui.components.SafetyReportBottomSheet
 import com.unmuted.app.ui.components.rememberStudioHaptics
+import com.unmuted.app.ui.navigation.UnmutedBottomBar
+import com.unmuted.app.ui.navigation.UnmutedOverlays
 import com.unmuted.app.ui.screens.ComposerStudioSheet
 import com.unmuted.app.ui.screens.DiscoverScreen
 import com.unmuted.app.ui.screens.DiscoverSubTab
@@ -102,17 +104,7 @@ import com.unmuted.app.ui.viewmodel.InboxViewModel
 import com.unmuted.app.ui.viewmodel.ProfileViewModel
 import com.unmuted.app.ui.viewmodel.RoomsViewModel
 
-enum class UnmutedTab(
-    val label: String,
-    val selectedIcon: ImageVector,
-    val unselectedIcon: ImageVector
-) {
-    FEED("Feed", Icons.Filled.Home, Icons.Outlined.Home),
-    DISCOVER("Discover", Icons.Filled.Explore, Icons.Outlined.Explore),
-    ROOMS("Rooms", Icons.Filled.Forum, Icons.Outlined.Forum),
-    INBOX("Inbox", Icons.Filled.Mail, Icons.Outlined.MailOutline),
-    PROFILE("Profile", Icons.Filled.Person, Icons.Outlined.PersonOutline)
-}
+typealias UnmutedTab = com.unmuted.app.ui.navigation.UnmutedTab
 
 @Composable
 fun UnmutedAppShell(
@@ -745,217 +737,41 @@ fun UnmutedAppShell(
                 }
             }
 
-            // Center Studio Mic Composer Sheet
-            if (showComposer) {
-                ComposerStudioSheet(
-                    draft = composerDraft,
-                    recordingState = recordingState,
-                    playback = playback,
-                    rooms = roomsWindow,
-                    currentUid = currentUid,
-                    audioPlayer = audioPlaybackViewModel.audioPlayer,
-                    onDismiss = {
-                        audioPlaybackViewModel.audioRecorder.reset()
-                        audioPlaybackViewModel.stopPlayback()
-                        showComposer = false
-                    },
-                    onSelectKind = { feedViewModel.updateComposerKind(it) },
-                    onSelectRoom = { feedViewModel.selectComposerRoom(it) },
-                    onToggleAnonymous = { feedViewModel.toggleComposerAnonymous(it) },
-                    onRollBurner = { feedViewModel.rollBurnerIdentity() },
-                    onSelectDisguise = { feedViewModel.setComposerDisguise(it) },
-                    onToggleHotTake = { feedViewModel.toggleComposerHotTake(it) },
-                    onQuoteRangeChanged = { s, e -> feedViewModel.updateQuoteRange(s, e) },
-                    onPreviewQuoteClip = {
-                        composerDraft.quotedPost?.let { qPost ->
-                            audioPlaybackViewModel.previewQuotedClip(
-                                quotedPost = qPost,
-                                startMs = composerDraft.quoteStartMs,
-                                endMs = composerDraft.quoteEndMs
-                            )
-                        }
-                    },
-                    onStartRecord = { feedViewModel.startStudioRecording() },
-                    onTogglePauseRecord = { audioPlaybackViewModel.audioRecorder.togglePause() },
-                    onStopRecord = { feedViewModel.stopStudioRecording() },
-                    onRetake = { feedViewModel.retakeStudioRecording() },
-                    onRetryTranscribe = { feedViewModel.retryComposerTranscription() },
-                    onTranscriptChanged = { feedViewModel.updateComposerTranscript(it) },
-                    onHeadlineChanged = { feedViewModel.updateComposerHeadline(it) },
-                    onHashtagsChanged = { feedViewModel.updateComposerHashtags(it) },
-                    onAttachImageUri = { feedViewModel.attachComposerImage(it) },
-                    onClearImage = { feedViewModel.clearComposerImage() },
-                    onPublish = {
-                        feedViewModel.publishComposerPost(myProfile) {
-                            showComposer = false
-                            pagedPosts.refresh()
-                            pagedDiscoverPosts.refresh()
-                        }
-                    }
-                )
-            }
-
-            // Threaded Voice & Text Comments Sheet
-            val commentsTarget = activeCommentsPost
-            if (commentsTarget != null) {
-                CommentsBottomSheet(
-                    post = commentsTarget,
-                    initialStance = activeCommentsInitialStance,
-                    commentsState = commentsState,
-                    filteredAuthorUids = filteredAuthorUids,
-                    playback = playback,
-                    recordingState = recordingState,
-                    audioRecorder = audioPlaybackViewModel.audioRecorder,
-                    onDismiss = { feedViewModel.closeComments() },
-                    onPlayVoiceComment = { mediaId, disguise ->
-                        audioPlaybackViewModel.togglePlayMediaId(
-                            mediaId = mediaId,
-                            disguise = disguise,
-                            speakerName = commentsTarget.displaySpeakerName(),
-                            title = "Voice Reply"
-                        )
-                    },
-                    onUpvoteComment = { comment -> feedViewModel.upvoteComment(commentsTarget.id, comment) },
-                    onReportComment = { comment ->
-                        pendingReportTarget = SafetyReportTarget(
-                            targetType = "COMMENT",
-                            targetId = comment.id,
-                            targetAuthorUid = comment.authorUid,
-                            targetDisplayName = comment.displaySpeakerName()
-                        )
-                    },
-                    onSendTextComment = { text, stance, done ->
-                        feedViewModel.submitTextComment(commentsTarget, myProfile, text, stance, done)
-                    },
-                    onSendVoiceComment = { file, dur, peaks, disguise, stance, done ->
-                        feedViewModel.submitVoiceComment(
-                            post = commentsTarget,
-                            author = myProfile,
-                            audioFile = file,
-                            durationMs = dur,
-                            peaks = peaks,
-                            disguise = disguise,
-                            stance = stance,
-                            onDone = done
-                        )
-                    }
-                )
-            }
-
-            // Mandatory Structured Safety Report Sheet (Illegal & Harmful Content Compliance)
-            val reportTarget = pendingReportTarget
-            if (reportTarget != null) {
-                SafetyReportBottomSheet(
-                    target = reportTarget,
-                    currentUid = currentUid,
-                    onDismiss = { pendingReportTarget = null },
-                    onSubmit = { category, details, alsoBlock ->
-                        feedViewModel.submitSafetyReport(reportTarget, category, details, alsoBlock)
-                        pendingReportTarget = null
-                    }
-                )
-            }
-
-            // User-Controlled Safety & Open Debate Controls Sheet
-            if (showSafetyControlsSheet) {
-                SafetyControlsBottomSheet(
-                    settings = safetySettings,
-                    relations = safetyRelations,
-                    onUpdateSettings = { updated -> feedViewModel.updateSafetySettings(updated) },
-                    onRemoveRelation = { targetUid -> feedViewModel.removeSafetyRelation(targetUid) },
-                    onDismiss = { showSafetyControlsSheet = false }
-                )
-            }
-
-            // Full-Screen Spotify-Style Word-Synced Lyrics Focus Dialog
-            val lyricsModalPost = globalLyricsPost
-            if (lyricsModalPost != null) {
-                FullLyricsFocusDialog(
-                    post = lyricsModalPost,
-                    playback = playback,
-                    onPlayPause = { audioPlaybackViewModel.togglePlayPost(lyricsModalPost) },
-                    onSeekToMs = { ms -> audioPlaybackViewModel.seekTo(ms) },
-                    onDismiss = { globalLyricsPost = null }
-                )
-            }
+            UnmutedOverlays(
+                showComposer = showComposer,
+                composerDraft = composerDraft,
+                recordingState = recordingState,
+                playback = playback,
+                roomsWindow = roomsWindow,
+                currentUid = currentUid,
+                myProfile = myProfile,
+                audioPlaybackViewModel = audioPlaybackViewModel,
+                feedViewModel = feedViewModel,
+                pagedPosts = pagedPosts,
+                pagedDiscoverPosts = pagedDiscoverPosts,
+                onDismissComposer = { showComposer = false },
+                activeCommentsPost = activeCommentsPost,
+                activeCommentsInitialStance = activeCommentsInitialStance,
+                commentsState = commentsState,
+                filteredAuthorUids = filteredAuthorUids,
+                onCloseComments = { feedViewModel.closeComments() },
+                pendingReportTarget = pendingReportTarget,
+                onDismissReport = { pendingReportTarget = null },
+                onSubmitReport = { target, category, details, alsoBlock ->
+                    feedViewModel.submitSafetyReport(target, category, details, alsoBlock)
+                    pendingReportTarget = null
+                },
+                showSafetyControlsSheet = showSafetyControlsSheet,
+                safetySettings = safetySettings,
+                safetyRelations = safetyRelations,
+                onDismissSafetyControls = { showSafetyControlsSheet = false },
+                onUpdateSafetySettings = { updated -> feedViewModel.updateSafetySettings(updated) },
+                onRemoveSafetyRelation = { targetUid -> feedViewModel.removeSafetyRelation(targetUid) },
+                globalLyricsPost = globalLyricsPost,
+                onDismissLyricsFocus = { globalLyricsPost = null },
+                onTogglePlayPost = { post -> audioPlaybackViewModel.togglePlayPost(post) },
+                onSeekToMs = { ms -> audioPlaybackViewModel.seekTo(ms) }
+            )
         }
-    }
-}
-
-@Composable
-private fun UnmutedBottomBar(
-    currentTab: UnmutedTab,
-    onSelectTab: (UnmutedTab) -> Unit,
-    onOpenStudioMic: () -> Unit
-) {
-    Surface(
-        color = ObsidianSurface,
-        tonalElevation = 4.dp,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column {
-            HorizontalDivider(color = ObsidianHairline)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceAround,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                BottomNavItem(UnmutedTab.FEED, currentTab == UnmutedTab.FEED) { onSelectTab(UnmutedTab.FEED) }
-                BottomNavItem(UnmutedTab.DISCOVER, currentTab == UnmutedTab.DISCOVER) { onSelectTab(UnmutedTab.DISCOVER) }
-
-                // Center Tactile Midnight Studio Mic Button
-                Box(
-                    modifier = Modifier
-                        .size(54.dp)
-                        .clip(CircleShape)
-                        .background(Brush.linearGradient(listOf(ElectricCoral, StudioViolet)))
-                        .clickable(onClick = onOpenStudioMic)
-                        .testTag("speak_studio_fab"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Mic,
-                        contentDescription = "Open Studio Mic to speak",
-                        tint = StudioWhite,
-                        modifier = Modifier.size(26.dp)
-                    )
-                }
-
-                BottomNavItem(UnmutedTab.ROOMS, currentTab == UnmutedTab.ROOMS) { onSelectTab(UnmutedTab.ROOMS) }
-                BottomNavItem(UnmutedTab.INBOX, currentTab == UnmutedTab.INBOX) { onSelectTab(UnmutedTab.INBOX) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun BottomNavItem(
-    tab: UnmutedTab,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-            .testTag("nav_tab_${tab.name.lowercase()}")
-    ) {
-        Icon(
-            imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
-            contentDescription = tab.label,
-            tint = if (selected) ElectricCoral else TitaniumMuted,
-            modifier = Modifier.size(23.dp)
-        )
-        Spacer(Modifier.size(2.dp))
-        Text(
-            text = tab.label,
-            style = MaterialTheme.typography.labelSmall,
-            color = if (selected) ElectricCoral else TitaniumMuted
-        )
     }
 }

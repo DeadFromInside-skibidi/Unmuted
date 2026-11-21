@@ -387,7 +387,11 @@ fun FeedScreen(
                             }
                         }
 
-                        itemsIndexed(voiceDrops, key = { _, drop -> drop.id }) { index, drop ->
+                        itemsIndexed(
+                            voiceDrops,
+                            key = { _, drop -> drop.id },
+                            contentType = { _, _ -> "voice_drop" }
+                        ) { index, drop ->
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier
@@ -479,7 +483,8 @@ fun FeedScreen(
                         key = { i ->
                             val realIdx = orderedIndices[i]
                             pagedPosts.peek(realIdx)?.id ?: "page_slot_$realIdx"
-                        }
+                        },
+                        contentType = { "feed_post" }
                     ) { i ->
                         val realIdx = orderedIndices[i]
                         val rawPost = pagedPosts[realIdx] ?: return@items

@@ -341,7 +341,8 @@ fun RoomsScreen(
 
                             items(
                                 count = pagedRooms.itemCount,
-                                key = { idx -> pagedRooms.peek(idx)?.id ?: "room_placeholder_$idx" }
+                                key = { idx -> pagedRooms.peek(idx)?.id ?: "room_placeholder_$idx" },
+                                contentType = { "room_item" }
                             ) { idx ->
                                 val room = pagedRooms[idx] ?: return@items
                                 if (!roomMatchesFilters(room, filter, q, joinedRooms, safetySettings)) return@items
@@ -661,7 +662,7 @@ private fun RoomDetailView(
                     // Room Feed Filter Chips: All Voices | Hot Takes | Clapbacks
                     Spacer(Modifier.height(12.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(RoomPostFilter.entries) { tab ->
+                        items(RoomPostFilter.entries, key = { it.name }, contentType = { "room_filter_chip" }) { tab ->
                             val selected = postFilter == tab
                             val chipTint = when (tab) {
                                 RoomPostFilter.HOT_TAKES -> AmberVinyl
@@ -727,7 +728,7 @@ private fun RoomDetailView(
                     }
                 }
             } else {
-                items(displayedPosts, key = { it.id }) { post ->
+                items(displayedPosts, key = { it.id }, contentType = { "room_post" }) { post ->
                     VoicePostCard(
                         post = post,
                         playback = playback,

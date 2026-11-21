@@ -413,7 +413,7 @@ fun DiscoverScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(DiscoverFilter.entries) { chip ->
+            items(DiscoverFilter.entries, key = { it.name }, contentType = { "filter_chip" }) { chip ->
                 val selected = chip == activeFilter
                 val chipAccent = when (chip) {
                     DiscoverFilter.ANONYMOUS -> StudioViolet
@@ -487,7 +487,7 @@ fun DiscoverScreen(
                                 modifier = Modifier.padding(horizontal = 4.dp)
                             )
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                items(matchingRooms, key = { it.id }) { room ->
+                                items(matchingRooms, key = { it.id }, contentType = { "room_chip" }) { room ->
                                     DiscoverRoomResultChip(
                                         room = room,
                                         onClick = { onOpenRoom(room.id) }
@@ -501,7 +501,7 @@ fun DiscoverScreen(
                 if (matchingHashtags.isNotEmpty()) {
                     item(key = "search_tags_section") {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(matchingHashtags) { (tag, count) ->
+                            items(matchingHashtags, key = { it.first }, contentType = { "hashtag_chip" }) { (tag, count) ->
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
                                     color = ObsidianSurfaceElevated,
@@ -617,7 +617,8 @@ fun DiscoverScreen(
                     } else {
                         items(
                             count = pagedPosts.itemCount,
-                            key = { index -> pagedPosts.peek(index)?.id ?: index }
+                            key = { index -> pagedPosts.peek(index)?.id ?: index },
+                            contentType = { "discover_post" }
                         ) { index ->
                             val rawPost = pagedPosts[index]
                             if (rawPost != null) {
