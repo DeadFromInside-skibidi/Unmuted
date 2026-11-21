@@ -1,0 +1,6 @@
+{
+  "name": "Unmuted",
+  "description": "Audio-first social platform with synced Gemini captions, Voice Shorts, Voice Drops, Anonymous Rooms, voice DMs, and customizable profiles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

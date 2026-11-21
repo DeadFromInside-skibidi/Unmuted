@@ -1,0 +1,42 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidAudioUpload() {
+      return request.resource.size <= 10 * 1024 * 1024 &&
+             request.resource.contentType.matches('audio/.*');
+    }
+
+    // Public / Feed Audio Posts & Voice Drops
+    match /audio/posts/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidAudioUpload();
+    }
+
+    // Voice Comments & Clapback Replies
+    match /audio/comments/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidAudioUpload();
+    }
+
+    // Pinned Voice Bios
+    match /audio/bios/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == uid && isValidAudioUpload();
+    }
+
+    // Direct Voice Messages (Participant-only access)
+    // convId format: uid1_uid2
+    match /audio/dms/{convId}/{msgId} {
+      allow read: if isSignedIn() && convId.matches('.*' + request.auth.uid + '.*');
+      allow write: if isSignedIn() &&
+                      convId.matches('.*' + request.auth.uid + '.*') &&
+                      isValidAudioUpload();
+    }
+  }
+}

@@ -1,0 +1,303 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public customizable studio profile for an Unmuted user (zero PII).",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID of the profile owner." },
+        "displayName": { "type": "string", "description": "User display name (1-60 chars)." },
+        "handle": { "type": "string", "description": "Unique @handle without @ prefix (2-30 chars)." },
+        "bio": { "type": "string", "description": "Optional short bio (0-240 chars)." },
+        "accentKey": { "type": "string", "description": "Selected profile accent theme key." },
+        "bannerKey": { "type": "string", "description": "Selected studio banner preset key." },
+        "waveformStyle": { "type": "string", "description": "Preferred waveform visual style." },
+        "avatarBase64": { "type": "string", "description": "Optional compressed avatar image data." },
+        "voiceBioMediaId": { "type": "string", "description": "Optional AudioBlob ID for pinned 15s Voice Bio." },
+        "voiceBioTranscript": { "type": "string", "description": "Transcript of the pinned Voice Bio." },
+        "voiceBioDurationMs": { "type": "integer", "description": "Duration of the Voice Bio in milliseconds." },
+        "voiceBioPeaks": { "type": "array", "description": "Normalized waveform amplitude peaks for Voice Bio." },
+        "interests": { "type": "array", "description": "Up to 12 topic badges." },
+        "followerCount": { "type": "integer", "description": "Cached follower counter." },
+        "followingCount": { "type": "integer", "description": "Cached following counter." },
+        "visibility": { "type": "string", "enum": ["PUBLIC"] },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp set via FieldValue.serverTimestamp()." }
+      },
+      "required": ["userId", "displayName", "handle", "accentKey", "bannerKey", "waveformStyle", "visibility", "createdAt", "updatedAt"]
+    },
+    "UserPostReaction": {
+      "title": "UserPostReaction",
+      "description": "Per-user vote, echo, and bookmark state for a specific VoicePost.",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "vote": { "type": "string", "enum": ["NONE", "LIKE", "DISLIKE"] },
+        "echoed": { "type": "boolean" },
+        "bookmarked": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postId", "vote", "echoed", "bookmarked", "updatedAt"]
+    },
+    "JoinedRoom": {
+      "title": "JoinedRoom",
+      "description": "Tracks a user's joined community room and optional deterministic anonymous alias.",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string" },
+        "anonymousAlias": { "type": "string" },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "joinedAt"]
+    },
+    "UserFollow": {
+      "title": "UserFollow",
+      "description": "Tracks a follow edge owned by the authenticated user.",
+      "type": "object",
+      "properties": {
+        "targetUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["targetUid", "createdAt"]
+    },
+    "AudioBlob": {
+      "title": "AudioBlob",
+      "description": "Compact AAC audio clip payload fetched on demand and cached locally.",
+      "type": "object",
+      "properties": {
+        "authorUid": { "type": "string" },
+        "audioBase64": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "durationMs": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorUid", "audioBase64", "mimeType", "durationMs", "createdAt"]
+    },
+    "CommunityRoom": {
+      "title": "CommunityRoom",
+      "description": "Topic community room supporting standard or fully anonymous discussion mode.",
+      "type": "object",
+      "properties": {
+        "slug": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "anonymousRoom": { "type": "boolean" },
+        "accentKey": { "type": "string" },
+        "guidelines": { "type": "string" },
+        "creatorUid": { "type": "string" },
+        "memberCount": { "type": "integer" },
+        "postCount": { "type": "integer" },
+        "visibility": { "type": "string", "enum": ["PUBLIC"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["slug", "name", "description", "category", "anonymousRoom", "accentKey", "creatorUid", "memberCount", "postCount", "visibility", "createdAt", "updatedAt"]
+    },
+    "VoicePost": {
+      "title": "VoicePost",
+      "description": "Audio-first social post (Main Feed Voice, Pulse Short, or 24h Voice Drop).",
+      "type": "object",
+      "properties": {
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorHandle": { "type": "string" },
+        "authorAccentKey": { "type": "string" },
+        "authorAvatarBase64": { "type": "string" },
+        "postKind": { "type": "string", "enum": ["FEED_VOICE", "PULSE_SHORT", "VOICE_DROP"] },
+        "roomId": { "type": "string" },
+        "roomSlug": { "type": "string" },
+        "anonymousMode": { "type": "boolean" },
+        "anonymousAlias": { "type": "string" },
+        "voiceDisguise": { "type": "string", "enum": ["NONE", "DEEP", "STUDIO_RADIO", "GLITCH", "NEUTRAL_SHIFT", "MASKED", "HIGH"] },
+        "audioMediaId": { "type": "string" },
+        "durationMs": { "type": "integer" },
+        "waveformPeaks": { "type": "array" },
+        "transcript": { "type": "string" },
+        "captionSegments": { "type": "array" },
+        "headlineText": { "type": "string" },
+        "attachmentImageBase64": { "type": "string" },
+        "hashtags": { "type": "array" },
+        "likeCount": { "type": "integer" },
+        "dislikeCount": { "type": "integer" },
+        "commentCount": { "type": "integer" },
+        "echoCount": { "type": "integer" },
+        "hotTakeMode": { "type": "boolean" },
+        "agreeCount": { "type": "integer" },
+        "disagreeCount": { "type": "integer" },
+        "quotedPostId": { "type": "string" },
+        "quotedAuthorName": { "type": "string" },
+        "quotedAudioMediaId": { "type": "string" },
+        "quotedStartMs": { "type": "integer" },
+        "quotedEndMs": { "type": "integer" },
+        "quotedDisguise": { "type": "string", "enum": ["NONE", "DEEP", "STUDIO_RADIO", "GLITCH", "NEUTRAL_SHIFT", "MASKED", "HIGH"] },
+        "quotedTranscript": { "type": "string" },
+        "quotedWaveformPeaks": { "type": "array" },
+        "expiresAtMs": { "type": "integer" },
+        "visibility": { "type": "string", "enum": ["PUBLIC"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorUid", "authorName", "authorHandle", "postKind", "anonymousMode", "voiceDisguise", "durationMs", "waveformPeaks", "transcript", "captionSegments", "likeCount", "dislikeCount", "commentCount", "echoCount", "visibility", "createdAt", "updatedAt"]
+    },
+    "VoiceComment": {
+      "title": "VoiceComment",
+      "description": "Threaded voice or text reply under a VoicePost.",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorHandle": { "type": "string" },
+        "anonymousMode": { "type": "boolean" },
+        "anonymousAlias": { "type": "string" },
+        "voiceDisguise": { "type": "string", "enum": ["NONE", "DEEP", "STUDIO_RADIO", "GLITCH", "NEUTRAL_SHIFT", "MASKED", "HIGH"] },
+        "stance": { "type": "string", "enum": ["NONE", "AGREE", "DISAGREE"] },
+        "textBody": { "type": "string" },
+        "audioMediaId": { "type": "string" },
+        "durationMs": { "type": "integer" },
+        "waveformPeaks": { "type": "array" },
+        "transcript": { "type": "string" },
+        "captionSegments": { "type": "array" },
+        "likeCount": { "type": "integer" },
+        "dislikeCount": { "type": "integer" },
+        "visibility": { "type": "string", "enum": ["PUBLIC"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postId", "authorUid", "authorName", "authorHandle", "anonymousMode", "voiceDisguise", "durationMs", "waveformPeaks", "likeCount", "dislikeCount", "visibility", "createdAt", "updatedAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Two-participant direct messaging conversation strictly isolated to participantUids.",
+      "type": "object",
+      "properties": {
+        "participantUids": { "type": "array" },
+        "participantNames": { "type": "object" },
+        "participantHandles": { "type": "object" },
+        "lastMessagePreview": { "type": "string" },
+        "lastMessageKind": { "type": "string", "enum": ["VOICE", "TEXT", "IMAGE"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["participantUids", "participantNames", "participantHandles", "lastMessagePreview", "lastMessageKind", "createdAt", "updatedAt"]
+    },
+    "DirectMessage": {
+      "title": "DirectMessage",
+      "description": "Voice note, text, or optional photo message inside a participant-isolated conversation.",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string" },
+        "senderUid": { "type": "string" },
+        "senderName": { "type": "string" },
+        "participantUids": { "type": "array" },
+        "messageKind": { "type": "string", "enum": ["VOICE", "TEXT", "IMAGE"] },
+        "textBody": { "type": "string" },
+        "audioBase64": { "type": "string" },
+        "durationMs": { "type": "integer" },
+        "waveformPeaks": { "type": "array" },
+        "transcript": { "type": "string" },
+        "captionSegments": { "type": "array" },
+        "imageBase64": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["conversationId", "senderUid", "senderName", "participantUids", "messageKind", "durationMs", "waveformPeaks", "createdAt"]
+    },
+    "SafetySettings": {
+      "title": "SafetySettings",
+      "description": "User-controlled content sensitivity and community downvote visibility controls.",
+      "type": "object",
+      "properties": {
+        "showUnfilteredControversial": { "type": "boolean" },
+        "collapseHeavilyDownvoted": { "type": "boolean" },
+        "downvoteThreshold": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["showUnfilteredControversial", "collapseHeavilyDownvoted", "downvoteThreshold", "updatedAt"]
+    },
+    "SafetyRelation": {
+      "title": "SafetyRelation",
+      "description": "Per-user mute or block edge for filtering speakers without censoring open debate.",
+      "type": "object",
+      "properties": {
+        "targetUid": { "type": "string" },
+        "targetName": { "type": "string" },
+        "relationType": { "type": "string", "enum": ["MUTE", "BLOCK"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["targetUid", "relationType", "createdAt", "updatedAt"]
+    },
+    "ContentReport": {
+      "title": "ContentReport",
+      "description": "Structured moderation and illegal-content report for Play Store safety compliance.",
+      "type": "object",
+      "properties": {
+        "reporterUid": { "type": "string" },
+        "targetType": { "type": "string", "enum": ["POST", "COMMENT", "ROOM", "USER"] },
+        "targetId": { "type": "string" },
+        "category": { "type": "string", "enum": ["CSAM_EXPLOITATION", "VIOLENCE_THREATS", "DOXXING_PRIVACY", "SELF_HARM_TERRORISM", "ILLEGAL_GOODS_FRAUD", "HARASSMENT_HATE", "OTHER"] },
+        "reason": { "type": "string" },
+        "details": { "type": "string" },
+        "targetAuthorUid": { "type": "string" },
+        "urgentLegalReview": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reporterUid", "targetType", "targetId", "reason", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Public studio user profiles (zero PII)."
+    },
+    "/users/{userId}/reactions/{postId}": {
+      "schema": { "$ref": "#/entities/UserPostReaction" },
+      "description": "User's private vote, echo, and bookmark tracking per post."
+    },
+    "/users/{userId}/joined_rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/JoinedRoom" },
+      "description": "User's joined rooms and per-room anonymous aliases."
+    },
+    "/users/{userId}/following/{targetUid}": {
+      "schema": { "$ref": "#/entities/UserFollow" },
+      "description": "Accounts followed by the authenticated user."
+    },
+    "/users/{userId}/safety_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/SafetySettings" },
+      "description": "Private user-controlled content sensitivity and downvote visibility settings."
+    },
+    "/users/{userId}/safety_relations/{targetUid}": {
+      "schema": { "$ref": "#/entities/SafetyRelation" },
+      "description": "Private per-user muted and blocked speaker controls."
+    },
+    "/audio_blobs/{blobId}": {
+      "schema": { "$ref": "#/entities/AudioBlob" },
+      "description": "On-demand compact AAC audio payloads."
+    },
+    "/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/CommunityRoom" },
+      "description": "Standard and Anonymous community rooms."
+    },
+    "/posts/{postId}": {
+      "schema": { "$ref": "#/entities/VoicePost" },
+      "description": "Audio-first posts, Voice Shorts (Pulses), and 24h Voice Drops."
+    },
+    "/posts/{postId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/VoiceComment" },
+      "description": "Threaded voice and text comments on a VoicePost."
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Direct messaging conversations isolated to participants."
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/DirectMessage" },
+      "description": "Voice notes, text, and photo messages within a conversation."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/ContentReport" },
+      "description": "UGC safety reports."
+    }
+  }
+}

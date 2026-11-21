@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Unmuted</string>
+    <string name="tagline">Speak unfiltered. Hear every side.</string>
+    <string name="sign_in_google">Sign in with Google</string>
+    <string name="tab_feed">Feed</string>
+    <string name="tab_pulses">Pulses</string>
+    <string name="tab_speak">Speak</string>
+    <string name="tab_rooms">Rooms</string>
+    <string name="tab_inbox">Inbox</string>
+    <string name="tab_profile">Profile</string>
+    <string name="captions_on">Lyrics On</string>
+    <string name="captions_off">Lyrics Off</string>
+    <string name="anonymous_shield_active">Identity Shield Active</string>
+    <string name="mic_permission_rationale">Unmuted needs microphone access so you can record voices, stories, replies, and voice DMs.</string>
+    <string name="grant_mic_permission">Allow Microphone</string>
+</resources>
