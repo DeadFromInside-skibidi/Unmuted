@@ -162,6 +162,7 @@ fun DiscoverScreen(
     onHidePost: (String) -> Unit,
     onDeletePost: (String) -> Unit,
     onPreloadPosts: (List<VoicePost>) -> Unit = {},
+    onSeedSampleData: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (subTab == DiscoverSubTab.PULSES) {
@@ -249,7 +250,12 @@ fun DiscoverScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Box(
                     modifier = Modifier
                         .size(34.dp)
@@ -265,16 +271,19 @@ fun DiscoverScreen(
                     )
                 }
                 Spacer(Modifier.width(10.dp))
-                Column {
+                Column(modifier = Modifier.weight(1f, fill = false)) {
                     Text(
                         text = "Discover",
                         style = MaterialTheme.typography.headlineSmall,
-                        color = StudioWhite
+                        color = StudioWhite,
+                        maxLines = 1
                     )
                     Text(
                         text = if (subTab == DiscoverSubTab.EXPLORE) "Live audio debates & voices" else "Auto-play vertical voice shorts",
                         style = MaterialTheme.typography.labelSmall,
-                        color = TitaniumMuted
+                        color = TitaniumMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -310,7 +319,8 @@ fun DiscoverScreen(
                             text = "Radio",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = if (radioModeEnabled) FontWeight.Bold else FontWeight.Normal,
-                            color = if (radioModeEnabled) StudioWhite else TitaniumMuted
+                            color = if (radioModeEnabled) StudioWhite else TitaniumMuted,
+                            maxLines = 1
                         )
                     }
                 }
@@ -335,7 +345,7 @@ fun DiscoverScreen(
                                         haptics(HapticCue.CAPTION_TOGGLE)
                                         onSubTabChanged(tab)
                                     }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
                                     .testTag("discover_subtab_${tab.name.lowercase()}"),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -343,7 +353,8 @@ fun DiscoverScreen(
                                     text = tab.label,
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (selected) StudioWhite else TitaniumMuted
+                                    color = if (selected) StudioWhite else TitaniumMuted,
+                                    maxLines = 1
                                 )
                             }
                         }

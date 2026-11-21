@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GppGood
 import androidx.compose.material.icons.filled.GraphicEq
@@ -88,6 +89,7 @@ import com.unmuted.app.ui.components.VoicePostSkeleton
 import com.unmuted.app.ui.components.isPlaybackActive
 import com.unmuted.app.ui.components.rememberStudioHaptics
 import com.unmuted.app.ui.theme.AcousticError
+import com.unmuted.app.ui.theme.AmberVinyl
 import com.unmuted.app.ui.theme.ElectricCoral
 import com.unmuted.app.ui.theme.ObsidianBackground
 import com.unmuted.app.ui.theme.ObsidianHairline
@@ -143,6 +145,7 @@ fun FeedScreen(
     onHidePost: (String) -> Unit,
     onDeletePost: (String) -> Unit,
     onPreloadPosts: (List<VoicePost>) -> Unit = {},
+    onSeedSampleData: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(FeedFilterTab.FOR_YOU) }
@@ -208,7 +211,12 @@ fun FeedScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Box(
                     modifier = Modifier
                         .size(34.dp)
@@ -224,16 +232,19 @@ fun FeedScreen(
                     )
                 }
                 Spacer(Modifier.width(10.dp))
-                Column {
+                Column(modifier = Modifier.weight(1f, fill = false)) {
                     Text(
                         text = "Unmuted",
                         style = MaterialTheme.typography.headlineSmall,
-                        color = StudioWhite
+                        color = StudioWhite,
+                        maxLines = 1
                     )
                     Text(
                         text = "Tap any waveform to listen",
                         style = MaterialTheme.typography.labelSmall,
-                        color = TitaniumMuted
+                        color = TitaniumMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -571,7 +582,8 @@ fun FeedScreen(
                                 } else {
                                     "Be the first to share an unfiltered voice take with live word-synced captions."
                                 },
-                                onSpeak = onRecordNewVoice
+                                onSpeak = onRecordNewVoice,
+                                onSeedSampleData = onSeedSampleData
                             )
                         }
                     }
@@ -651,7 +663,8 @@ fun FeedScreen(
 private fun EmptyFeedStudioCard(
     title: String,
     subtitle: String,
-    onSpeak: () -> Unit
+    onSpeak: () -> Unit,
+    onSeedSampleData: (() -> Unit)? = null
 ) {
     Surface(
         shape = RoundedCornerShape(24.dp),
@@ -689,6 +702,17 @@ private fun EmptyFeedStudioCard(
                 Icon(Icons.Filled.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Record First Voice")
+            }
+            if (onSeedSampleData != null) {
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = onSeedSampleData,
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Icon(Icons.Filled.Bolt, contentDescription = null, modifier = Modifier.size(16.dp), tint = AmberVinyl)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Load Sample Studio Takes", color = StudioWhite)
+                }
             }
         }
     }

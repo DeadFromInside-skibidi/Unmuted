@@ -395,6 +395,7 @@ fun UnmutedAppShell(
                             onHidePost = { id -> feedViewModel.hidePostLocally(id) },
                             onDeletePost = { id -> feedViewModel.deletePost(id) },
                             onPreloadPosts = { posts -> audioPlaybackViewModel.preloadPostsAudio(posts) },
+                            onSeedSampleData = { feedViewModel.seedDemoDatabase() },
                             modifier = mod
                         )
 
@@ -463,6 +464,7 @@ fun UnmutedAppShell(
                             onHidePost = { id -> feedViewModel.hidePostLocally(id) },
                             onDeletePost = { id -> feedViewModel.deletePost(id) },
                             onPreloadPosts = { posts -> audioPlaybackViewModel.preloadPostsAudio(posts) },
+                            onSeedSampleData = { feedViewModel.seedDemoDatabase() },
                             modifier = mod
                         )
 
@@ -527,6 +529,7 @@ fun UnmutedAppShell(
                                 if (uid == currentUid) currentTab = UnmutedTab.PROFILE
                                 else viewingOtherUserId = uid
                             },
+                            onSeedSampleData = { feedViewModel.seedDemoDatabase() },
                             modifier = mod
                         )
 

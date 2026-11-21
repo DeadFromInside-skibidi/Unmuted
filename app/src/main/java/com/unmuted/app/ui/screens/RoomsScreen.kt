@@ -28,6 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.Forum
@@ -148,6 +149,7 @@ fun RoomsScreen(
     onDeletePost: (String) -> Unit,
     onExpandLyrics: (VoicePost) -> Unit,
     onOpenSpeakerProfile: (String) -> Unit,
+    onSeedSampleData: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val loadedPagedRooms = pagedRooms.itemSnapshotList.items
@@ -224,19 +226,35 @@ fun RoomsScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
-                    Text("Rooms", style = MaterialTheme.typography.headlineMedium, color = StudioWhite)
-                    Text("Dual-side debates & anonymous voice spaces", style = MaterialTheme.typography.bodySmall, color = TitaniumMuted)
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 12.dp)
+                ) {
+                    Text(
+                        text = "Rooms",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = StudioWhite,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = "Dual-side debates & anonymous voice spaces",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TitaniumMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
                 Button(
                     onClick = { showCreateSheet = true },
                     colors = ButtonDefaults.buttonColors(containerColor = ElectricCoral),
                     shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                     modifier = Modifier.testTag("create_room_btn")
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("New Room")
+                    Text("New Room", maxLines = 1)
                 }
             }
 
@@ -340,6 +358,15 @@ fun RoomsScreen(
                                     shape = RoundedCornerShape(14.dp)
                                 ) {
                                     Text("Create First Room")
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                OutlinedButton(
+                                    onClick = onSeedSampleData,
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Icon(Icons.Filled.Bolt, null, modifier = Modifier.size(16.dp), tint = AmberVinyl)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Load Sample Community Rooms", color = StudioWhite)
                                 }
                             }
                         }

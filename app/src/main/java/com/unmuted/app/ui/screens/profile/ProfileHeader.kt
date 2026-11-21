@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.GppGood
 import androidx.compose.material.icons.filled.MailOutline
@@ -175,9 +177,9 @@ fun ProfileHeader(
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Filled.Palette, null, tint = accent.primary, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Filled.Edit, null, tint = accent.primary, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Studio Theme", style = MaterialTheme.typography.labelLarge, color = StudioWhite)
+                                Text("Edit Profile", style = MaterialTheme.typography.labelLarge, color = StudioWhite)
                             }
                         }
                         IconButton(
@@ -247,6 +249,13 @@ fun ProfileHeader(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(start = 18.dp, bottom = 6.dp)
+                    .clip(CircleShape)
+                    .clickable(enabled = isOwnProfile) {
+                        if (isOwnProfile) {
+                            haptics(HapticCue.CAPTION_TOGGLE)
+                            onCustomizeStudio()
+                        }
+                    }
             )
         }
 
@@ -271,7 +280,21 @@ fun ProfileHeader(
                         )
                     }
                 }
-                if (!isOwnProfile) {
+                if (isOwnProfile) {
+                    OutlinedButton(
+                        onClick = {
+                            haptics(HapticCue.CAPTION_TOGGLE)
+                            onCustomizeStudio()
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("identity_edit_profile_btn")
+                    ) {
+                        Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(14.dp), tint = accent.primary)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Edit Profile", style = MaterialTheme.typography.labelMedium, color = StudioWhite)
+                    }
+                } else {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = onMessageUser,

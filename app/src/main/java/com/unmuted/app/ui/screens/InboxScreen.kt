@@ -152,19 +152,35 @@ fun InboxScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column {
-                Text("Voice Inbox", style = MaterialTheme.typography.headlineMedium, color = StudioWhite)
-                Text("Private voice notes with instant transcripts", style = MaterialTheme.typography.bodySmall, color = TitaniumMuted)
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 12.dp)
+            ) {
+                Text(
+                    text = "Voice Inbox",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = StudioWhite,
+                    maxLines = 1
+                )
+                Text(
+                    text = "Private voice notes with instant transcripts",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TitaniumMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
             Button(
                 onClick = { showNewChatSheet = true },
                 colors = ButtonDefaults.buttonColors(containerColor = ElectricCoral),
                 shape = RoundedCornerShape(14.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                 modifier = Modifier.testTag("new_dm_button")
             ) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("New DM")
+                Text("New DM", maxLines = 1)
             }
         }
 

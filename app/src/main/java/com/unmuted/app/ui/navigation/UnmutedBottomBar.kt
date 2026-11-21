@@ -75,7 +75,7 @@ fun UnmutedBottomBar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceAround,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -85,7 +85,7 @@ fun UnmutedBottomBar(
                 // Center Tactile Midnight Studio Mic Button
                 Box(
                     modifier = Modifier
-                        .size(54.dp)
+                        .size(50.dp)
                         .clip(CircleShape)
                         .background(Brush.linearGradient(listOf(ElectricCoral, StudioViolet)))
                         .clickable(onClick = onOpenStudioMic)
@@ -96,12 +96,13 @@ fun UnmutedBottomBar(
                         imageVector = Icons.Filled.Mic,
                         contentDescription = "Open Studio Mic to speak",
                         tint = StudioWhite,
-                        modifier = Modifier.size(26.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                 }
 
                 BottomNavItem(UnmutedTab.ROOMS, currentTab == UnmutedTab.ROOMS) { onSelectTab(UnmutedTab.ROOMS) }
                 BottomNavItem(UnmutedTab.INBOX, currentTab == UnmutedTab.INBOX) { onSelectTab(UnmutedTab.INBOX) }
+                BottomNavItem(UnmutedTab.PROFILE, currentTab == UnmutedTab.PROFILE) { onSelectTab(UnmutedTab.PROFILE) }
             }
         }
     }
@@ -116,16 +117,16 @@ fun BottomNavItem(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .padding(horizontal = 6.dp, vertical = 4.dp)
             .testTag("nav_tab_${tab.name.lowercase()}")
     ) {
         Icon(
             imageVector = if (selected) tab.selectedIcon else tab.unselectedIcon,
             contentDescription = tab.label,
             tint = if (selected) ElectricCoral else TitaniumMuted,
-            modifier = Modifier.size(23.dp)
+            modifier = Modifier.size(22.dp)
         )
         Spacer(Modifier.size(2.dp))
         Text(

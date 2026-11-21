@@ -32,6 +32,7 @@ import com.unmuted.app.data.VoiceDisguise
 import com.unmuted.app.data.VoicePost
 import com.unmuted.app.data.VoteType
 import com.unmuted.app.data.repository.AudioStorageRepository
+import com.unmuted.app.data.repository.DatabaseSeeder
 import com.unmuted.app.data.repository.FeedRepository
 import com.unmuted.app.data.repository.SafetyRepository
 import com.unmuted.app.data.repository.nextReverseChronoId
@@ -61,6 +62,17 @@ class FeedViewModel(
 
     val currentUid: String = Firebase.auth.currentUser?.uid.orEmpty()
     val snackbarMessage: StateFlow<String?> = messageBus.message
+
+    init {
+        viewModelScope.launch {
+            if (currentUid.isNotBlank()) {
+                val seeded = DatabaseSeeder.seedIfEmpty(appContext, currentUid).getOrDefault(false)
+                if (seeded) {
+                    refreshPosts()
+                }
+            }
+        }
+    }
 
     // Paging 3 paginated voice feed (incremental Firestore loading)
     val pagedPosts: Flow<PagingData<VoicePost>> = feedRepository.pagedPostsFlow(pageSize = 15)
@@ -138,6 +150,27 @@ class FeedViewModel(
     fun refreshPosts() {
         _postOverrides.value = emptyMap()
         feedRepository.invalidatePostsPaging()
+    }
+
+    fun seedDemoDatabase() {
+        viewModelScope.launch {
+            if (currentUid.isBlank()) {
+                showMessage("Sign in with Google first to explore demo studio content.")
+                return@launch
+            }
+            showMessage("Seeding sample rooms, debate takes & demo profiles...")
+            val result = DatabaseSeeder.seedDatabase(appContext, currentUid)
+            result.fold(
+                onSuccess = { count ->
+                    showMessage("Loaded $count studio takes & community rooms into Cloud Firestore!")
+                    refreshPosts()
+                },
+                onFailure = { error ->
+                    showMessage("Seeding note: ${error.localizedMessage ?: "Completed"}")
+                    refreshPosts()
+                }
+            )
+        }
     }
 
     // --- SAFETY ACTIONS ---
