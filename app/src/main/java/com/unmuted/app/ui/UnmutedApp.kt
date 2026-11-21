@@ -5,6 +5,12 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +28,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +39,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Home
@@ -62,11 +70,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.paging.compose.collectAsLazyPagingItems
+import com.unmuted.app.core.NetworkMonitor
 import com.unmuted.app.core.signOutUser
 import com.unmuted.app.data.PostKind
 import com.unmuted.app.data.SafetyReportTarget
@@ -87,6 +97,7 @@ import com.unmuted.app.ui.screens.FullLyricsFocusDialog
 import com.unmuted.app.ui.screens.InboxScreen
 import com.unmuted.app.ui.screens.ProfileScreen
 import com.unmuted.app.ui.screens.RoomsScreen
+import com.unmuted.app.ui.theme.AmberVinyl
 import com.unmuted.app.ui.theme.ElectricCoral
 import com.unmuted.app.ui.theme.ObsidianBackground
 import com.unmuted.app.ui.theme.ObsidianHairline
@@ -114,9 +125,12 @@ fun UnmutedAppShell(
     roomsViewModel: RoomsViewModel,
     inboxViewModel: InboxViewModel,
     profileViewModel: ProfileViewModel,
-    onSignedOut: () -> Unit
+    onSignedOut: () -> Unit,
+    networkMonitor: NetworkMonitor? = null
 ) {
     val context = LocalContext.current
+    val networkMonitorInstance = remember(context) { networkMonitor ?: NetworkMonitor(context) }
+    val isOnline by networkMonitorInstance.isOnline.collectAsStateWithLifecycle(initialValue = true)
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
     val haptics = rememberStudioHaptics()
@@ -663,7 +677,16 @@ fun UnmutedAppShell(
                         }
                     }
                     Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                        contentBody(Modifier.fillMaxSize())
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            AnimatedVisibility(
+                                visible = !isOnline,
+                                enter = expandVertically() + fadeIn(),
+                                exit = shrinkVertically() + fadeOut()
+                            ) {
+                                OfflineGracefulBanner()
+                            }
+                            contentBody(Modifier.weight(1f).fillMaxWidth())
+                        }
                         Column(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
@@ -733,7 +756,16 @@ fun UnmutedAppShell(
                         }
                     }
                 ) { innerPadding ->
-                    contentBody(Modifier.fillMaxSize().padding(innerPadding))
+                    Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                        AnimatedVisibility(
+                            visible = !isOnline,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
+                        ) {
+                            OfflineGracefulBanner()
+                        }
+                        contentBody(Modifier.weight(1f).fillMaxWidth())
+                    }
                 }
             }
 
@@ -771,6 +803,38 @@ fun UnmutedAppShell(
                 onDismissLyricsFocus = { globalLyricsPost = null },
                 onTogglePlayPost = { post -> audioPlaybackViewModel.togglePlayPost(post) },
                 onSeekToMs = { ms -> audioPlaybackViewModel.seekTo(ms) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun OfflineGracefulBanner(modifier: Modifier = Modifier) {
+    Surface(
+        shape = RoundedCornerShape(0.dp),
+        color = AmberVinyl.copy(alpha = 0.16f),
+        border = BorderStroke(1.dp, AmberVinyl.copy(alpha = 0.35f)),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("offline_connectivity_banner")
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Filled.WifiOff,
+                contentDescription = "Offline",
+                tint = AmberVinyl,
+                modifier = Modifier.size(15.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "Offline mode — cached voice takes still play",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+                color = AmberVinyl
             )
         }
     }

@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -52,6 +53,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -68,6 +70,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
+import com.unmuted.app.core.PlaybackPhase
 import com.unmuted.app.core.PlaybackState
 import com.unmuted.app.data.CommunityRoom
 import com.unmuted.app.data.DebateStance
@@ -82,7 +85,10 @@ import com.unmuted.app.data.WaveformStyle
 import com.unmuted.app.ui.components.HapticCue
 import com.unmuted.app.ui.components.UnfilteredFilterNoticeBanner
 import com.unmuted.app.ui.components.VoicePostCard
+import com.unmuted.app.ui.components.VoicePostSkeleton
+import com.unmuted.app.ui.components.isPlaybackActive
 import com.unmuted.app.ui.components.rememberStudioHaptics
+import com.unmuted.app.ui.theme.AcousticError
 import com.unmuted.app.ui.theme.AmberVinyl
 import com.unmuted.app.ui.theme.ElectricCoral
 import com.unmuted.app.ui.theme.ObsidianBackground
@@ -110,6 +116,7 @@ private fun DiscoverFilter.icon(): ImageVector = when (this) {
     DiscoverFilter.SHORT_CLIPS -> Icons.Filled.GraphicEq
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiscoverScreen(
     pagedPosts: LazyPagingItems<VoicePost>,
@@ -460,12 +467,18 @@ fun DiscoverScreen(
         }
 
         // Scrollable Hybrid Explore + Threads Audio Feed (Paging 3 backed)
-        LazyColumn(
-            state = exploreListState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 152.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        val isRefreshing = pagedPosts.loadState.refresh is LoadState.Loading && pagedPosts.itemCount > 0
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = { pagedPosts.refresh() },
+            modifier = Modifier.fillMaxSize()
         ) {
+            LazyColumn(
+                state = exploreListState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 152.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             if (hiddenControversialCount > 0) {
                 item(key = "discover_unfiltered_notice") {
                     UnfilteredFilterNoticeBanner(
@@ -568,16 +581,11 @@ fun DiscoverScreen(
                 }
             }
 
-            // Scrollable VoicePostCard Feed driven by Paging 3 LoadState
+            // Scrollable VoicePostCard Feed driven by Paging 3 LoadState: Shimmer skeletons during initial load
             when (val refreshState = pagedPosts.loadState.refresh) {
                 is LoadState.Loading -> {
-                    item(key = "discover_loading") {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(color = ElectricCoral)
-                        }
+                    items(4, key = { "discover_skeleton_$it" }, contentType = { "discover_skeleton" }) {
+                        VoicePostSkeleton()
                     }
                 }
                 is LoadState.Error -> {
@@ -585,6 +593,7 @@ fun DiscoverScreen(
                         Surface(
                             shape = RoundedCornerShape(18.dp),
                             color = ObsidianSurface,
+                            border = BorderStroke(1.dp, AcousticError.copy(alpha = 0.35f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
@@ -593,7 +602,8 @@ fun DiscoverScreen(
                             ) {
                                 Text(
                                     text = refreshState.error.localizedMessage ?: "Failed to load voices.",
-                                    color = MaterialTheme.colorScheme.error
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodyMedium
                                 )
                                 Spacer(Modifier.height(10.dp))
                                 OutlinedButton(onClick = { pagedPosts.retry() }) {
@@ -626,9 +636,23 @@ fun DiscoverScreen(
                                 val isHidden = hiddenPostIds.contains(post.id) || filteredAuthorUids.contains(post.authorUid)
                                 val isSafetyBlocked = !safetySettings.showUnfilteredControversial && post.isUnfilteredOrControversial()
                                 if (!isHidden && !isSafetyBlocked && post.kindEnum() != PostKind.VOICE_DROP) {
+                                    val isPostActive = post.isPlaybackActive(playback)
                                     VoicePostCard(
                                         post = post,
-                                        playback = playback,
+                                        isActive = isPostActive,
+                                        isPlaying = isPostActive && playback.playing,
+                                        positionMs = if (isPostActive) {
+                                            if (post.hasQuoteClip()) playback.combinedPositionMs else playback.positionMs
+                                        } else 0L,
+                                        durationMs = if (isPostActive) {
+                                            if (post.hasQuoteClip() && playback.combinedDurationMs > 0L) playback.combinedDurationMs
+                                            else if (playback.durationMs > 0L) playback.durationMs
+                                            else post.durationMs.coerceAtLeast(1L)
+                                        } else post.durationMs.coerceAtLeast(1L),
+                                        isBuffering = isPostActive && playback.buffering,
+                                        isQuotedPhase = isPostActive && post.hasQuoteClip() && playback.activePhase == PlaybackPhase.QUOTED_CLIP,
+                                        playbackSpeed = playback.speed,
+                                        quoteSplitFraction = if (isPostActive && playback.quoteSplitFraction > 0f) playback.quoteSplitFraction else null,
                                         reaction = reactions[post.id],
                                         currentUid = currentUid,
                                         waveformStyle = preferredWaveStyle,
@@ -678,18 +702,34 @@ fun DiscoverScreen(
                 }
                 is LoadState.Error -> {
                     item(key = "discover_append_error") {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.Center
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = ObsidianSurfaceElevated,
+                            border = BorderStroke(1.dp, AcousticError.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
                         ) {
-                            OutlinedButton(onClick = { pagedPosts.retry() }) {
-                                Text(appendState.error.localizedMessage ?: "Retry loading more voices")
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = appendState.error.localizedMessage ?: "Couldn't load more voices",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TitaniumMuted,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                OutlinedButton(onClick = { pagedPosts.retry() }) {
+                                    Text("Retry")
+                                }
                             }
                         }
                     }
                 }
                 else -> Unit
             }
+        }
         }
     }
 }

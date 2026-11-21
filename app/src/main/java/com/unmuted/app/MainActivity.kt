@@ -108,7 +108,8 @@ private fun UnmutedRootGate() {
                 roomsViewModel = roomsViewModel,
                 inboxViewModel = inboxViewModel,
                 profileViewModel = profileViewModel,
-                onSignedOut = { currentUser = null }
+                onSignedOut = { currentUser = null },
+                networkMonitor = container.networkMonitor
             )
         }
     }

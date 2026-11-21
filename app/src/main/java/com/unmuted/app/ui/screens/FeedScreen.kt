@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -41,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -63,6 +65,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
+import com.unmuted.app.core.PlaybackPhase
 import com.unmuted.app.core.PlaybackState
 import com.unmuted.app.data.DebateStance
 import com.unmuted.app.data.PostKind
@@ -81,7 +84,10 @@ import com.unmuted.app.ui.components.SyncedLyricsView
 import com.unmuted.app.ui.components.UnfilteredFilterNoticeBanner
 import com.unmuted.app.ui.components.UserAvatarBadge
 import com.unmuted.app.ui.components.VoicePostCard
+import com.unmuted.app.ui.components.VoicePostSkeleton
+import com.unmuted.app.ui.components.isPlaybackActive
 import com.unmuted.app.ui.components.rememberStudioHaptics
+import com.unmuted.app.ui.theme.AcousticError
 import com.unmuted.app.ui.theme.ElectricCoral
 import com.unmuted.app.ui.theme.ObsidianBackground
 import com.unmuted.app.ui.theme.ObsidianHairline
@@ -99,6 +105,7 @@ private enum class FeedFilterTab(val label: String) {
     TRENDING("Trending")
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeedScreen(
     pagedPosts: LazyPagingItems<VoicePost>,
@@ -330,12 +337,18 @@ fun FeedScreen(
             }
         }
 
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize().testTag("feed_paging_list"),
-            contentPadding = PaddingValues(top = 8.dp, bottom = 152.dp, start = 14.dp, end = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+        val isRefreshing = pagedPosts.loadState.refresh is LoadState.Loading && pagedPosts.itemCount > 0
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = { pagedPosts.refresh() },
+            modifier = Modifier.fillMaxSize()
         ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().testTag("feed_paging_list"),
+                contentPadding = PaddingValues(top = 8.dp, bottom = 152.dp, start = 14.dp, end = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
             // Audio Stories Rail ("Voice Drops")
             item(key = "voice_drops_rail") {
                 Column {
@@ -433,16 +446,11 @@ fun FeedScreen(
                 }
             }
 
-            // Paging 3 Refresh State
+            // Paging 3 Refresh State: Shimmer skeletons during initial load
             when (val refreshState = pagedPosts.loadState.refresh) {
                 is LoadState.Loading -> {
-                    item(key = "feed_loading") {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(color = ElectricCoral)
-                        }
+                    items(4, key = { "feed_skeleton_$it" }, contentType = { "feed_skeleton" }) {
+                        VoicePostSkeleton()
                     }
                 }
                 is LoadState.Error -> {
@@ -450,12 +458,17 @@ fun FeedScreen(
                         Surface(
                             shape = RoundedCornerShape(18.dp),
                             color = ObsidianSurface,
+                            border = BorderStroke(1.dp, AcousticError.copy(alpha = 0.35f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.padding(18.dp)) {
+                            Column(
+                                modifier = Modifier.padding(18.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
                                 Text(
                                     text = refreshState.error.localizedMessage ?: "Failed to load voices",
-                                    color = MaterialTheme.colorScheme.error
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodyMedium
                                 )
                                 Spacer(Modifier.height(10.dp))
                                 OutlinedButton(onClick = { pagedPosts.retry() }) {
@@ -497,9 +510,23 @@ fun FeedScreen(
 
                         if (visible) {
                             renderedCount += 1
+                            val isPostActive = post.isPlaybackActive(playback)
                             VoicePostCard(
                                 post = post,
-                                playback = playback,
+                                isActive = isPostActive,
+                                isPlaying = isPostActive && playback.playing,
+                                positionMs = if (isPostActive) {
+                                    if (post.hasQuoteClip()) playback.combinedPositionMs else playback.positionMs
+                                } else 0L,
+                                durationMs = if (isPostActive) {
+                                    if (post.hasQuoteClip() && playback.combinedDurationMs > 0L) playback.combinedDurationMs
+                                    else if (playback.durationMs > 0L) playback.durationMs
+                                    else post.durationMs.coerceAtLeast(1L)
+                                } else post.durationMs.coerceAtLeast(1L),
+                                isBuffering = isPostActive && playback.buffering,
+                                isQuotedPhase = isPostActive && post.hasQuoteClip() && playback.activePhase == PlaybackPhase.QUOTED_CLIP,
+                                playbackSpeed = playback.speed,
+                                quoteSplitFraction = if (isPostActive && playback.quoteSplitFraction > 0f) playback.quoteSplitFraction else null,
                                 reaction = reactions[post.id],
                                 currentUid = currentUid,
                                 waveformStyle = preferredWaveStyle,
@@ -565,25 +592,34 @@ fun FeedScreen(
                 }
                 is LoadState.Error -> {
                     item(key = "feed_append_error") {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = ObsidianSurfaceElevated,
+                            border = BorderStroke(1.dp, AcousticError.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
                         ) {
-                            Text(
-                                text = appendState.error.localizedMessage ?: "Couldn't load more voices",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TitaniumMuted
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            OutlinedButton(onClick = { pagedPosts.retry() }) {
-                                Text("Retry")
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = appendState.error.localizedMessage ?: "Couldn't load more voices",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TitaniumMuted,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                OutlinedButton(onClick = { pagedPosts.retry() }) {
+                                    Text("Retry")
+                                }
                             }
                         }
                     }
                 }
                 else -> {}
             }
+        }
         }
     }
 

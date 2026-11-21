@@ -1,6 +1,7 @@
 package com.unmuted.app.ui.navigation
 
 import androidx.compose.runtime.Composable
+import com.unmuted.app.core.NetworkMonitor
 import com.unmuted.app.ui.viewmodel.AudioPlaybackViewModel
 import com.unmuted.app.ui.viewmodel.DiscoverViewModel
 import com.unmuted.app.ui.viewmodel.FeedViewModel
@@ -19,7 +20,8 @@ fun UnmutedAppShell(
     roomsViewModel: RoomsViewModel,
     inboxViewModel: InboxViewModel,
     profileViewModel: ProfileViewModel,
-    onSignedOut: () -> Unit
+    onSignedOut: () -> Unit,
+    networkMonitor: NetworkMonitor? = null
 ) {
     com.unmuted.app.ui.UnmutedAppShell(
         audioPlaybackViewModel = audioPlaybackViewModel,
@@ -28,6 +30,7 @@ fun UnmutedAppShell(
         roomsViewModel = roomsViewModel,
         inboxViewModel = inboxViewModel,
         profileViewModel = profileViewModel,
-        onSignedOut = onSignedOut
+        onSignedOut = onSignedOut,
+        networkMonitor = networkMonitor
     )
 }

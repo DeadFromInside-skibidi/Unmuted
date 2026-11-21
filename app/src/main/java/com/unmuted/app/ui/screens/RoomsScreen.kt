@@ -52,6 +52,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -69,6 +70,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
+import com.unmuted.app.core.PlaybackPhase
 import com.unmuted.app.core.PlaybackState
 import com.unmuted.app.data.AliasGenerator
 import com.unmuted.app.data.CommunityRoom
@@ -81,6 +83,9 @@ import com.unmuted.app.data.VoteType
 import com.unmuted.app.ui.components.GeometricBurnerAvatar
 import com.unmuted.app.ui.components.UnfilteredFilterNoticeBanner
 import com.unmuted.app.ui.components.VoicePostCard
+import com.unmuted.app.ui.components.VoicePostSkeleton
+import com.unmuted.app.ui.components.isPlaybackActive
+import com.unmuted.app.ui.theme.AcousticError
 import com.unmuted.app.ui.theme.AmberVinyl
 import com.unmuted.app.ui.theme.ElectricCoral
 import com.unmuted.app.ui.theme.ObsidianBackground
@@ -274,23 +279,36 @@ fun RoomsScreen(
 
             when (val refreshState = pagedRooms.loadState.refresh) {
                 is LoadState.Loading -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = ElectricCoral)
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        repeat(4) {
+                            VoicePostSkeleton()
+                        }
                     }
                 }
                 is LoadState.Error -> {
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = ObsidianSurface,
+                        border = BorderStroke(1.dp, AcousticError.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth().padding(16.dp)
                     ) {
-                        Text(
-                            text = refreshState.error.localizedMessage ?: "Failed to load rooms.",
-                            color = MaterialTheme.colorScheme.error
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        OutlinedButton(onClick = { pagedRooms.retry() }) {
-                            Text("Retry")
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = refreshState.error.localizedMessage ?: "Failed to load rooms.",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            OutlinedButton(onClick = { pagedRooms.retry() }) {
+                                Text("Retry")
+                            }
                         }
                     }
                 }
@@ -326,10 +344,16 @@ fun RoomsScreen(
                             }
                         }
                     } else {
-                        LazyColumn(
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 148.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        val isRefreshing = pagedRooms.loadState.refresh is LoadState.Loading && pagedRooms.itemCount > 0
+                        PullToRefreshBox(
+                            isRefreshing = isRefreshing,
+                            onRefresh = { pagedRooms.refresh() },
+                            modifier = Modifier.fillMaxSize()
                         ) {
+                            LazyColumn(
+                                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 148.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
                             if (hiddenUnfilteredRoomsCount > 0) {
                                 item(key = "rooms_unfiltered_notice") {
                                     UnfilteredFilterNoticeBanner(
@@ -472,18 +496,34 @@ fun RoomsScreen(
                                 }
                                 is LoadState.Error -> {
                                     item(key = "rooms_append_error") {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                                            horizontalArrangement = Arrangement.Center
+                                        Surface(
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = ObsidianSurfaceElevated,
+                                            border = BorderStroke(1.dp, AcousticError.copy(alpha = 0.35f)),
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
                                         ) {
-                                            OutlinedButton(onClick = { pagedRooms.retry() }) {
-                                                Text(appendState.error.localizedMessage ?: "Retry loading more rooms")
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = appendState.error.localizedMessage ?: "Retry loading more rooms",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = TitaniumMuted,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Spacer(Modifier.width(10.dp))
+                                                OutlinedButton(onClick = { pagedRooms.retry() }) {
+                                                    Text("Retry")
+                                                }
                                             }
                                         }
                                     }
                                 }
                                 else -> Unit
                             }
+                        }
                         }
                     }
                 }
@@ -729,9 +769,23 @@ private fun RoomDetailView(
                 }
             } else {
                 items(displayedPosts, key = { it.id }, contentType = { "room_post" }) { post ->
+                    val isPostActive = post.isPlaybackActive(playback)
                     VoicePostCard(
                         post = post,
-                        playback = playback,
+                        isActive = isPostActive,
+                        isPlaying = isPostActive && playback.playing,
+                        positionMs = if (isPostActive) {
+                            if (post.hasQuoteClip()) playback.combinedPositionMs else playback.positionMs
+                        } else 0L,
+                        durationMs = if (isPostActive) {
+                            if (post.hasQuoteClip() && playback.combinedDurationMs > 0L) playback.combinedDurationMs
+                            else if (playback.durationMs > 0L) playback.durationMs
+                            else post.durationMs.coerceAtLeast(1L)
+                        } else post.durationMs.coerceAtLeast(1L),
+                        isBuffering = isPostActive && playback.buffering,
+                        isQuotedPhase = isPostActive && post.hasQuoteClip() && playback.activePhase == PlaybackPhase.QUOTED_CLIP,
+                        playbackSpeed = playback.speed,
+                        quoteSplitFraction = if (isPostActive && playback.quoteSplitFraction > 0f) playback.quoteSplitFraction else null,
                         reaction = reactions[post.id],
                         currentUid = currentUid,
                         safetySettings = safetySettings,

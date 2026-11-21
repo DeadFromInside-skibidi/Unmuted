@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ExpandLess
@@ -82,10 +83,35 @@ import com.unmuted.app.ui.theme.StudioViolet
 import com.unmuted.app.ui.theme.StudioWhite
 import com.unmuted.app.ui.theme.TitaniumMuted
 
+/**
+ * Determines whether this [VoicePost] matches the currently active media playing in [PlaybackState].
+ */
+fun VoicePost.isPlaybackActive(playback: PlaybackState): Boolean {
+    val isClapback = hasQuoteClip()
+    val expectedPlaybackId = if (isClapback) "clap_$id" else audioMediaId
+    return playback.activeMediaId == id ||
+        playback.nowPlaying?.sourcePostId == id ||
+        (!expectedPlaybackId.isNullOrBlank() && playback.activeMediaId == expectedPlaybackId) ||
+        (!audioUrl.isNullOrBlank() && playback.activeMediaId == audioUrl)
+}
+
+/**
+ * 120Hz Zero-Recomposition VoicePostCard.
+ * Receives primitives and deferred position providers so inactive posts never recompose
+ * on playback ticks.
+ */
 @Composable
 fun VoicePostCard(
     post: VoicePost,
-    playback: PlaybackState,
+    isActive: Boolean,
+    isPlaying: Boolean,
+    positionMs: Long = 0L,
+    durationMs: Long = post.durationMs,
+    isBuffering: Boolean = false,
+    isQuotedPhase: Boolean = false,
+    playbackSpeed: Float = 1.0f,
+    playbackPositionMsProvider: (() -> Long)? = null,
+    quoteSplitFraction: Float? = null,
     reaction: UserPostReaction?,
     currentUid: String,
     waveformStyle: WaveformStyle = WaveformStyle.BARS,
@@ -126,30 +152,20 @@ fun VoicePostCard(
     }
 
     val isClapback = post.hasQuoteClip()
-    val expectedPlaybackId = if (isClapback) "clap_${post.id}" else post.audioMediaId
-    val isThisActive = playback.activeMediaId == post.id ||
-        playback.nowPlaying?.sourcePostId == post.id ||
-        (!expectedPlaybackId.isNullOrBlank() && playback.activeMediaId == expectedPlaybackId) ||
-        (!post.audioUrl.isNullOrBlank() && playback.activeMediaId == post.audioUrl)
-    val isPlaying = isThisActive && playback.playing
-    val isBuffering = isThisActive && playback.buffering
-    val isQuotedPhase = isClapback && isThisActive && playback.activePhase == PlaybackPhase.QUOTED_CLIP
-
-    val durationMs = if (isClapback) {
-        if (isThisActive && playback.combinedDurationMs > 0L) playback.combinedDurationMs
-        else post.combinedDurationMs().coerceAtLeast(1L)
+    val isThisActive = isActive
+    val effectiveDurationMs = if (isClapback) {
+        if (durationMs > 1L) durationMs else post.combinedDurationMs().coerceAtLeast(1L)
     } else {
-        if (isThisActive && playback.durationMs > 0L) playback.durationMs
-        else post.durationMs.coerceAtLeast(1L)
+        if (durationMs > 1L) durationMs else post.durationMs.coerceAtLeast(1L)
     }
     val displayPosMs = if (isThisActive) {
-        if (isClapback) playback.combinedPositionMs else playback.positionMs
+        playbackPositionMsProvider?.invoke() ?: positionMs
     } else 0L
-    val progress = (displayPosMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+    val progress = (displayPosMs.toFloat() / effectiveDurationMs.toFloat()).coerceIn(0f, 1f)
 
     val splitFraction: Float? = if (isClapback) {
-        if (isThisActive && playback.quoteSplitFraction > 0f) {
-            playback.quoteSplitFraction
+        if (isThisActive && quoteSplitFraction != null && quoteSplitFraction > 0f) {
+            quoteSplitFraction
         } else {
             (post.quotedDurationMs().toFloat() / post.combinedDurationMs().coerceAtLeast(1L).toFloat())
                 .coerceIn(0.12f, 0.78f)
@@ -174,7 +190,7 @@ fun VoicePostCard(
     var showShareMenu by rememberSaveable(post.id) { mutableStateOf(false) }
     val haptics = rememberStudioHaptics()
 
-    val speedLabel = when (playback.speed) {
+    val speedLabel = when (playbackSpeed) {
         1.5f -> "1.5x"
         2.0f -> "2x"
         else -> "1x"
@@ -360,7 +376,7 @@ fun VoicePostCard(
                         if (isOtherAuthor && onMuteSpeaker != null) {
                             DropdownMenuItem(
                                 text = { Text("Mute speaker") },
-                                leadingIcon = { Icon(Icons.Filled.VolumeOff, null, tint = AmberVinyl) },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.VolumeOff, null, tint = AmberVinyl) },
                                 onClick = {
                                     menuExpanded = false
                                     onMuteSpeaker()
@@ -426,7 +442,6 @@ fun VoicePostCard(
                 Column {
                     VoicePostWaveformPlayer(
                         post = post,
-                        playback = playback,
                         isThisActive = isThisActive,
                         isPlaying = isPlaying,
                         isBuffering = isBuffering,
@@ -435,7 +450,7 @@ fun VoicePostCard(
                         activePlayColor = activePlayColor,
                         primaryAccent = primaryAccent,
                         accentSecondary = accentPalette.secondary,
-                        durationMs = durationMs,
+                        durationMs = effectiveDurationMs,
                         displayPosMs = displayPosMs,
                         progress = progress,
                         splitFraction = splitFraction,
@@ -452,12 +467,12 @@ fun VoicePostCard(
 
                     VoicePostLyricsBox(
                         post = post,
-                        playback = playback,
                         isThisActive = isThisActive,
                         isQuotedPhase = isQuotedPhase,
                         isClapback = isClapback,
                         captionsOpen = captionsOpen,
                         primaryAccent = primaryAccent,
+                        displayPosMs = displayPosMs,
                         onPlayPause = onPlayPause,
                         onSeekToMs = onSeekToMs,
                         onExpandLyrics = onExpandLyrics
@@ -600,5 +615,92 @@ fun VoicePostCard(
         primaryAccent = primaryAccent,
         showShareMenu = showShareMenu,
         onDismissShareMenu = { showShareMenu = false }
+    )
+}
+
+/**
+ * Convenience overload accepting [PlaybackState] directly.
+ * Extracts active state and positions before delegating to the 120Hz-optimized core Composable.
+ */
+@Composable
+fun VoicePostCard(
+    post: VoicePost,
+    playback: PlaybackState,
+    reaction: UserPostReaction?,
+    currentUid: String,
+    waveformStyle: WaveformStyle = WaveformStyle.BARS,
+    safetySettings: SafetySettings = SafetySettings(),
+    onPlayPause: () -> Unit,
+    onSeekToMs: (Long) -> Unit,
+    onCycleSpeed: () -> Unit,
+    onLike: () -> Unit,
+    onDislike: () -> Unit,
+    onOpenComments: () -> Unit,
+    onEcho: () -> Unit,
+    onBookmark: () -> Unit,
+    onExpandLyrics: () -> Unit,
+    onRoomClick: (String) -> Unit,
+    onSpeakerClick: (String) -> Unit,
+    onReport: () -> Unit,
+    onHide: () -> Unit,
+    onDelete: () -> Unit,
+    onMuteSpeaker: (() -> Unit)? = null,
+    onBlockSpeaker: (() -> Unit)? = null,
+    onHashtagClick: ((String) -> Unit)? = null,
+    onQuoteClapback: (() -> Unit)? = null,
+    onOpenDebateSide: ((DebateStance) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    val isClapback = post.hasQuoteClip()
+    val isThisActive = post.isPlaybackActive(playback)
+    val isPlaying = isThisActive && playback.playing
+    val isBuffering = isThisActive && playback.buffering
+    val isQuotedPhase = isClapback && isThisActive && playback.activePhase == PlaybackPhase.QUOTED_CLIP
+
+    val postDuration = if (isClapback) {
+        if (isThisActive && playback.combinedDurationMs > 0L) playback.combinedDurationMs
+        else post.combinedDurationMs().coerceAtLeast(1L)
+    } else {
+        if (isThisActive && playback.durationMs > 0L) playback.durationMs
+        else post.durationMs.coerceAtLeast(1L)
+    }
+    val displayPos = if (isThisActive) {
+        if (isClapback) playback.combinedPositionMs else playback.positionMs
+    } else 0L
+
+    VoicePostCard(
+        post = post,
+        isActive = isThisActive,
+        isPlaying = isPlaying,
+        positionMs = displayPos,
+        durationMs = postDuration,
+        isBuffering = isBuffering,
+        isQuotedPhase = isQuotedPhase,
+        playbackSpeed = playback.speed,
+        quoteSplitFraction = if (isThisActive && playback.quoteSplitFraction > 0f) playback.quoteSplitFraction else null,
+        reaction = reaction,
+        currentUid = currentUid,
+        waveformStyle = waveformStyle,
+        safetySettings = safetySettings,
+        onPlayPause = onPlayPause,
+        onSeekToMs = onSeekToMs,
+        onCycleSpeed = onCycleSpeed,
+        onLike = onLike,
+        onDislike = onDislike,
+        onOpenComments = onOpenComments,
+        onEcho = onEcho,
+        onBookmark = onBookmark,
+        onExpandLyrics = onExpandLyrics,
+        onRoomClick = onRoomClick,
+        onSpeakerClick = onSpeakerClick,
+        onReport = onReport,
+        onHide = onHide,
+        onDelete = onDelete,
+        onMuteSpeaker = onMuteSpeaker,
+        onBlockSpeaker = onBlockSpeaker,
+        onHashtagClick = onHashtagClick,
+        onQuoteClapback = onQuoteClapback,
+        onOpenDebateSide = onOpenDebateSide,
+        modifier = modifier
     )
 }

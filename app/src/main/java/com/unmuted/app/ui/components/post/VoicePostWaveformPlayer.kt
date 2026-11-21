@@ -52,7 +52,6 @@ import kotlin.math.roundToInt
 @Composable
 fun VoicePostWaveformPlayer(
     post: VoicePost,
-    playback: PlaybackState,
     isThisActive: Boolean,
     isPlaying: Boolean,
     isBuffering: Boolean,
@@ -74,6 +73,7 @@ fun VoicePostWaveformPlayer(
     onPlayPause: () -> Unit,
     onSeekToMs: (Long) -> Unit,
     onCycleSpeed: () -> Unit,
+    playback: PlaybackState? = null,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier) {

@@ -5,6 +5,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.unmuted.app.core.AudioPlayerManager
 import com.unmuted.app.core.AudioRecorderController
+import com.unmuted.app.core.NetworkMonitor
 import com.unmuted.app.core.TranscriptionService
 import com.unmuted.app.data.CaptionSegment
 import com.unmuted.app.data.CommunityRoom
@@ -106,8 +107,10 @@ class UnmutedContainer(context: Context) {
     val audioRecorder: AudioRecorderController = AudioRecorderController(appContext)
     val transcriptionService: TranscriptionService = TranscriptionService()
     val messageBus: AppMessageBus = AppMessageBus()
+    val networkMonitor: NetworkMonitor = NetworkMonitor(appContext)
 
     fun release() {
+        networkMonitor.release()
         audioPlayer.release()
         audioRecorder.release()
     }

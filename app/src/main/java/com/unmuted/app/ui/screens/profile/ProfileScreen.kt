@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.unmuted.app.core.AudioRecorderController
+import com.unmuted.app.core.PlaybackPhase
 import com.unmuted.app.core.PlaybackState
 import com.unmuted.app.core.RecordingState
 import com.unmuted.app.data.CommunityRoom
@@ -68,6 +69,7 @@ import com.unmuted.app.data.formatRelativeTime
 import com.unmuted.app.ui.components.HapticCue
 import com.unmuted.app.ui.components.InteractiveWaveform
 import com.unmuted.app.ui.components.VoicePostCard
+import com.unmuted.app.ui.components.isPlaybackActive
 import com.unmuted.app.ui.components.rememberStudioHaptics
 import com.unmuted.app.ui.theme.ElectricCoral
 import com.unmuted.app.ui.theme.ObsidianBackground
@@ -395,9 +397,23 @@ fun ProfileScreen(
                         key = { it.id },
                         contentType = { "voice_post" }
                     ) { post ->
+                        val isPostActive = post.isPlaybackActive(playback)
                         VoicePostCard(
                             post = post,
-                            playback = playback,
+                            isActive = isPostActive,
+                            isPlaying = isPostActive && playback.playing,
+                            positionMs = if (isPostActive) {
+                                if (post.hasQuoteClip()) playback.combinedPositionMs else playback.positionMs
+                            } else 0L,
+                            durationMs = if (isPostActive) {
+                                if (post.hasQuoteClip() && playback.combinedDurationMs > 0L) playback.combinedDurationMs
+                                else if (playback.durationMs > 0L) playback.durationMs
+                                else post.durationMs.coerceAtLeast(1L)
+                            } else post.durationMs.coerceAtLeast(1L),
+                            isBuffering = isPostActive && playback.buffering,
+                            isQuotedPhase = isPostActive && post.hasQuoteClip() && playback.activePhase == PlaybackPhase.QUOTED_CLIP,
+                            playbackSpeed = playback.speed,
+                            quoteSplitFraction = if (isPostActive && playback.quoteSplitFraction > 0f) playback.quoteSplitFraction else null,
                             reaction = reactions[post.id],
                             currentUid = currentUid,
                             waveformStyle = waveStyle,
@@ -451,9 +467,23 @@ fun ProfileScreen(
                         key = { it.id },
                         contentType = { "voice_post" }
                     ) { post ->
+                        val isPostActive = post.isPlaybackActive(playback)
                         VoicePostCard(
                             post = post,
-                            playback = playback,
+                            isActive = isPostActive,
+                            isPlaying = isPostActive && playback.playing,
+                            positionMs = if (isPostActive) {
+                                if (post.hasQuoteClip()) playback.combinedPositionMs else playback.positionMs
+                            } else 0L,
+                            durationMs = if (isPostActive) {
+                                if (post.hasQuoteClip() && playback.combinedDurationMs > 0L) playback.combinedDurationMs
+                                else if (playback.durationMs > 0L) playback.durationMs
+                                else post.durationMs.coerceAtLeast(1L)
+                            } else post.durationMs.coerceAtLeast(1L),
+                            isBuffering = isPostActive && playback.buffering,
+                            isQuotedPhase = isPostActive && post.hasQuoteClip() && playback.activePhase == PlaybackPhase.QUOTED_CLIP,
+                            playbackSpeed = playback.speed,
+                            quoteSplitFraction = if (isPostActive && playback.quoteSplitFraction > 0f) playback.quoteSplitFraction else null,
                             reaction = reactions[post.id],
                             currentUid = currentUid,
                             waveformStyle = waveStyle,
@@ -498,9 +528,23 @@ fun ProfileScreen(
                         key = { it.id },
                         contentType = { "voice_post" }
                     ) { post ->
+                        val isPostActive = post.isPlaybackActive(playback)
                         VoicePostCard(
                             post = post,
-                            playback = playback,
+                            isActive = isPostActive,
+                            isPlaying = isPostActive && playback.playing,
+                            positionMs = if (isPostActive) {
+                                if (post.hasQuoteClip()) playback.combinedPositionMs else playback.positionMs
+                            } else 0L,
+                            durationMs = if (isPostActive) {
+                                if (post.hasQuoteClip() && playback.combinedDurationMs > 0L) playback.combinedDurationMs
+                                else if (playback.durationMs > 0L) playback.durationMs
+                                else post.durationMs.coerceAtLeast(1L)
+                            } else post.durationMs.coerceAtLeast(1L),
+                            isBuffering = isPostActive && playback.buffering,
+                            isQuotedPhase = isPostActive && post.hasQuoteClip() && playback.activePhase == PlaybackPhase.QUOTED_CLIP,
+                            playbackSpeed = playback.speed,
+                            quoteSplitFraction = if (isPostActive && playback.quoteSplitFraction > 0f) playback.quoteSplitFraction else null,
                             reaction = reactions[post.id],
                             currentUid = currentUid,
                             waveformStyle = waveStyle,

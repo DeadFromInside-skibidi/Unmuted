@@ -46,12 +46,13 @@ import com.unmuted.app.ui.theme.TitaniumMuted
 @Composable
 fun VoicePostLyricsBox(
     post: VoicePost,
-    playback: PlaybackState,
     isThisActive: Boolean,
     isQuotedPhase: Boolean,
     isClapback: Boolean,
     captionsOpen: Boolean,
     primaryAccent: Color,
+    displayPosMs: Long = 0L,
+    playback: PlaybackState? = null,
     onPlayPause: () -> Unit,
     onSeekToMs: (Long) -> Unit,
     onExpandLyrics: () -> Unit,
@@ -129,7 +130,7 @@ fun VoicePostLyricsBox(
             SyncedLyricsView(
                 segments = post.captionSegments,
                 fallbackTranscript = post.transcript,
-                positionMs = if (isThisActive && !isQuotedPhase) playback.positionMs else 0L,
+                positionMs = if (isThisActive && !isQuotedPhase) (playback?.positionMs ?: displayPosMs) else 0L,
                 isActiveAudio = isThisActive && !isQuotedPhase,
                 isFullStage = false,
                 accentColor = primaryAccent,
