@@ -1,5 +1,6 @@
 package com.unmuted.app.ui.screens
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -19,8 +20,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Shield
@@ -31,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,9 +49,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -70,6 +76,7 @@ fun AuthScreen(
     onAuthSuccess: () -> Unit
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
 
@@ -197,6 +204,10 @@ fun AuthScreen(
                 Spacer(Modifier.height(22.dp))
 
                 AnimatedVisibility(visible = errorMessage != null) {
+                    val rawError = errorMessage.orEmpty()
+                    val sha1Match = remember(rawError) {
+                        Regex("""([0-9A-Fa-f]{2}:){19}[0-9A-Fa-f]{2}""").find(rawError)?.value
+                    }
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = AcousticErrorContainer,
@@ -204,12 +215,36 @@ fun AuthScreen(
                             .fillMaxWidth()
                             .padding(bottom = 14.dp)
                     ) {
-                        Text(
-                            text = errorMessage.orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = AcousticError,
-                            modifier = Modifier.padding(12.dp)
-                        )
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            SelectionContainer {
+                                Text(
+                                    text = rawError,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = AcousticError
+                                )
+                            }
+                            if (sha1Match != null) {
+                                Spacer(Modifier.height(8.dp))
+                                TextButton(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(sha1Match))
+                                        Toast.makeText(context, "Debug SHA-1 copied to clipboard!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.textButtonColors(
+                                        contentColor = ElectricCoral
+                                    ),
+                                    modifier = Modifier.align(Alignment.End)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.ContentCopy,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Copy SHA-1 Fingerprint", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -234,7 +269,7 @@ fun AuthScreen(
                             }
                         )
                     },
-                    enabled = !isSigningIn && !isCheckingAuto,
+                    enabled = !isSigningIn,
                     shape = RoundedCornerShape(18.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = ElectricCoral,
@@ -245,7 +280,7 @@ fun AuthScreen(
                         .height(56.dp)
                         .testTag("google_sign_in_button")
                 ) {
-                    if (isSigningIn || isCheckingAuto) {
+                    if (isSigningIn) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(22.dp),
                             color = StudioWhite,
@@ -253,7 +288,7 @@ fun AuthScreen(
                         )
                         Spacer(Modifier.width(10.dp))
                         Text(
-                            text = if (isCheckingAuto) "Checking studio session..." else "Signing in...",
+                            text = "Signing in...",
                             style = MaterialTheme.typography.titleMedium
                         )
                     } else {
