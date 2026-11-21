@@ -44,7 +44,12 @@ fun getAppCertificateSha1(context: Context): String? {
             )
         }
         val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            packageInfo.signingInfo?.apkContentsSigners
+            val signingInfo = packageInfo.signingInfo
+            if (signingInfo?.hasMultipleSigners() == true) {
+                signingInfo.apkContentsSigners
+            } else {
+                signingInfo?.signingCertificateHistory
+            }
         } else {
             @Suppress("DEPRECATION")
             packageInfo.signatures
@@ -73,7 +78,12 @@ fun getAppCertificateSha256(context: Context): String? {
             )
         }
         val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            packageInfo.signingInfo?.apkContentsSigners
+            val signingInfo = packageInfo.signingInfo
+            if (signingInfo?.hasMultipleSigners() == true) {
+                signingInfo.apkContentsSigners
+            } else {
+                signingInfo?.signingCertificateHistory
+            }
         } else {
             @Suppress("DEPRECATION")
             packageInfo.signatures
@@ -160,22 +170,29 @@ fun onGoogleSignInClicked(
         return
     }
 
-    val googleIdOption = GetGoogleIdOption.Builder()
-        .setFilterByAuthorizedAccounts(false)
-        .setServerClientId(clientId)
-        .setAutoSelectEnabled(false)
-        .build()
-
-    val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
-
-    val request = GetCredentialRequest.Builder()
-        .addCredentialOption(googleIdOption)
-        .addCredentialOption(signInOption)
-        .build()
-
     scope.launch {
         try {
-            val credential = credentialManager.getCredential(activity, request).credential
+            val credential = try {
+                val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(signInOption)
+                    .build()
+                credentialManager.getCredential(activity, request).credential
+            } catch (e: GetCredentialCancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("Auth", "GetSignInWithGoogleOption failed, falling back to GetGoogleIdOption: ${e.message}")
+                val googleIdOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(clientId)
+                    .setAutoSelectEnabled(false)
+                    .build()
+                val fallbackRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleIdOption)
+                    .build()
+                credentialManager.getCredential(activity, fallbackRequest).credential
+            }
+
             if (credential is CustomCredential && credential.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                 val idToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
                 Firebase.auth.signInWithCredential(GoogleAuthProvider.getCredential(idToken, null)).await()
@@ -190,12 +207,12 @@ fun onGoogleSignInClicked(
 
             if (isKnownSha1Mismatch) {
                 onAuthError(
-                    "Google Play Services blocked sign-in due to a SHA-1 fingerprint mismatch.\n\n" +
+                    "Google Play Services blocked sign-in (SHA-1 fingerprint mismatch).\n\n" +
                     "Your local debug APK SHA-1:\n$sha1\n\n" +
                     "Add this SHA-1 fingerprint to your Firebase Console under Project Settings -> Android Apps (com.unmuted.app) to authorize Google Sign-In."
                 )
             } else {
-                onAuthCancelled()
+                onAuthError("Google Sign-In was cancelled or dismissed. If the account dialog didn't show, verify your device has Google Play Services and a Google account.")
             }
         } catch (e: CancellationException) {
             throw e
@@ -209,6 +226,26 @@ fun onGoogleSignInClicked(
                 }
             }
             onAuthError(msg)
+        }
+    }
+}
+
+fun onGuestSignInClicked(
+    onAuthSuccess: () -> Unit,
+    onAuthError: (String) -> Unit,
+    scope: CoroutineScope
+) {
+    scope.launch {
+        try {
+            Firebase.auth.signInAnonymously().await()
+            onAuthSuccess()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("Auth", "Guest sign-in failed: ${e.message}")
+            onAuthError(
+                "Guest Sign-In is unavailable (${e.localizedMessage ?: "Anonymous auth disabled"}). Please use Sign in with Google."
+            )
         }
     }
 }

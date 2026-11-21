@@ -58,9 +58,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
 import com.unmuted.app.R
-import com.unmuted.app.core.attemptAutoSignIn
 import com.unmuted.app.core.onGoogleSignInClicked
+import com.unmuted.app.core.onGuestSignInClicked
 import com.unmuted.app.ui.theme.AcousticError
 import com.unmuted.app.ui.theme.AcousticErrorContainer
 import com.unmuted.app.ui.theme.ElectricCoral
@@ -80,23 +82,13 @@ fun AuthScreen(
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
 
-    var isCheckingAuto by remember { mutableStateOf(true) }
     var isSigningIn by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
-        attemptAutoSignIn(
-            context = context,
-            credentialManager = credentialManager,
-            onAuthSuccess = {
-                isCheckingAuto = false
-                onAuthSuccess()
-            },
-            onUnauthenticated = {
-                isCheckingAuto = false
-            },
-            scope = scope
-        )
+        if (Firebase.auth.currentUser != null) {
+            onAuthSuccess()
+        }
     }
 
     Box(
@@ -309,6 +301,42 @@ fun AuthScreen(
                         )
                     }
                 }
+                Spacer(Modifier.height(10.dp))
+
+                Button(
+                    onClick = {
+                        errorMessage = null
+                        isSigningIn = true
+                        onGuestSignInClicked(
+                            onAuthSuccess = {
+                                isSigningIn = false
+                                onAuthSuccess()
+                            },
+                            onAuthError = { msg ->
+                                isSigningIn = false
+                                errorMessage = msg
+                            },
+                            scope = scope
+                        )
+                    },
+                    enabled = !isSigningIn,
+                    shape = RoundedCornerShape(18.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ObsidianSurface,
+                        contentColor = StudioWhite
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("guest_sign_in_button")
+                ) {
+                    Text(
+                        text = "Continue as Studio Guest",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = TitaniumMuted
+                    )
+                }
+
                 Spacer(Modifier.height(10.dp))
                 Text(
                     text = "Your Google identity stays hidden whenever you speak in Anonymous Rooms.",
